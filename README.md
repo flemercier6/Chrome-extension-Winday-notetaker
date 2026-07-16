@@ -63,15 +63,17 @@ access is gated by Supabase Auth + RLS).
 
 ## Use
 
-Works in **Chrome** and in **Arc** (Arc doesn't render Chrome's native side
-panel, so the panel is docked *inside* the Meet page instead — same look, and it
-still pushes the page content aside rather than overlaying it).
+Works in **Chrome** and in **Arc**. The panel is a **companion window**: opening
+it shrinks the call's browser window by 380 px and docks the panel in the freed
+strip, glued to it when the window moves or resizes. This is a *real* push — the
+page's viewport genuinely narrows, so Meet re-lays-out natively (a CSS-only
+push can't work: Meet computes its layout in JS from `window.innerWidth`, and
+Arc has no native side-panel UI at all). Closing the panel gives the width back.
 
 1. Join a **Google Meet** call. A small pill appears at the top of the tab —
-   its **Ouvrir le panneau** button docks the panel on the right (the call page
-   is pushed aside, no overlay). The toolbar icon and `⌘⇧9` do the same.
-   **Sign in** in the panel with your Winday account (same credentials as the
-   macOS app / CRM).
+   its **Ouvrir le panneau** button opens the companion panel. The toolbar icon
+   and `⌘⇧9` do the same. **Sign in** in the panel with your Winday account
+   (same credentials as the macOS app / CRM).
 2. Open **Settings** (⚙) once and click **Autoriser le microphone** so your side
    of the call is captured. Set your **Notion database ID** there too.
 3. Start recording — two ways:
@@ -88,12 +90,13 @@ still pushes the page content aside rather than overlaying it).
 ### Notes & limitations (v1)
 
 - **Capture authorization**: Chromium only allows *silent* tab capture on a tab
-  where the extension was invoked (toolbar icon, right‑click menu item, `⌘⇧9`).
-  Without that grant, the panel's record button falls back to the native share
-  picker (`desktopCapture`) — one extra click, works everywhere including Arc.
+  where the extension was invoked (toolbar icon, right‑click menu item, `⌘⇧9` —
+  opening the panel with one of those counts). Without that grant, the panel's
+  record button falls back to the native share picker; if the browser has no
+  picker UI either, an actionable hint points to the two one‑gesture paths.
   The right‑click menu path is always silent.
-- On non‑Meet tabs, the toolbar icon opens the same UI as a full‑tab
-  **dashboard** (recordings list, retry, export).
+- A **fullscreen** call window can't be shrunk — the panel then opens beside it
+  without pushing. Un‑fullscreen to get the docked layout.
 - **Microphone permission** must be granted from the **Settings** page (a full
   tab) — extension pages are where Chrome shows the mic prompt. Without it, the
   call is still recorded (participants only); your voice just won't be on the
@@ -123,8 +126,8 @@ manifest.json          MV3 manifest
 config.js              publishable Supabase URL + anon key + model defaults
 background.js          service worker: offscreen lifecycle + message routing + state
 offscreen.html/.js     capture (tab + mic → stereo) + upload + pipeline
-content/content.js     meet.google.com: pill + docks the panel iframe (pushes the page)
-sidepanel/             the panel UI: docked in the Meet page (iframe) or full‑tab dashboard
+content/content.js     meet.google.com: floating status pill (shadow DOM)
+sidepanel/             the panel UI, hosted in the companion window
 options/               settings: mic permission, Notion db, models, prompt
 lib/supabase.js        auth / storage / Edge Function REST client
 lib/pipeline.js        upload → transcribe → summarize → export orchestration

@@ -1,15 +1,11 @@
-// Content script for meet.google.com. Two jobs:
+// Content script for meet.google.com: the floating pill (top center, shadow
+// DOM) mirroring the recorder state — idle -> recording (timer + stop) ->
+// processing -> done/failed. The panel itself is a COMPANION WINDOW managed by
+// the service worker (it shrinks the call's window and docks beside it — a
+// real push that Meet's JS-driven layout can't defeat); the pill's button just
+// asks for it (WN_OPEN_PANEL).
 //
-// 1. The floating pill (top center, shadow DOM): shows the recorder state —
-//    idle -> recording (timer + stop) -> processing -> done/failed.
-// 2. The DOCKED PANEL: Arc does not render Chrome's native side panel, so the
-//    panel UI (sidepanel/sidepanel.html) is embedded here as an iframe fixed to
-//    the right edge, and the page content is PUSHED aside with a margin on the
-//    document — not overlaid. Works identically in Arc and Chrome.
-//
-// The whole script is wrapped in a guard so the background can re-inject it
-// (chrome.scripting) into tabs whose copy went stale without redeclaring
-// top-level bindings.
+// Wrapped in a guard so a re-injection never redeclares top-level bindings.
 (() => {
   if (window.__windayNotetaker) {
     return;
@@ -18,92 +14,11 @@
   window.__windayNotetaker = api;
 
   const ACCENT = "#0077FF";
-  const PANEL_WIDTH = 380;
 
-  let host, root, els; // pill
-  let panelHost = null; // docked panel
+  let host, root, els;
   let state = { phase: "idle" };
   let inCall = false;
   let tick = null;
-
-  // --- Docked panel (pushes the page) ------------------------------------
-  //
-  // Pushing a page whose UI is `position: fixed` (Meet's control bar, stage…)
-  // takes more than a margin: fixed elements anchor to the VIEWPORT, so a
-  // margin on <html> leaves them spanning the full window and the panel just
-  // sits on top of them (overlay effect). The fix is the CSS containing-block
-  // rule: a TRANSFORMED element becomes the containing block for its fixed
-  // descendants. Giving <body> an identity transform + a reduced width makes
-  // every Meet element — in-flow AND fixed — lay out inside the shrunk box,
-  // while the panel and the pill (children of <html>, outside the transform)
-  // keep anchoring to the real viewport, in the freed right-hand strip.
-
-  let pushStyle = null;
-
-  function applyPush() {
-    if (pushStyle) return;
-    pushStyle = document.createElement("style");
-    pushStyle.id = "winday-push-style";
-    pushStyle.textContent = `
-      html { overflow-x: hidden !important; }
-      body {
-        width: calc(100% - ${PANEL_WIDTH}px) !important;
-        min-width: 0 !important;
-        transform: translate(0, 0) !important;
-      }
-    `;
-    document.documentElement.appendChild(pushStyle);
-    relayout();
-  }
-
-  function removePush() {
-    if (!pushStyle) return;
-    pushStyle.remove();
-    pushStyle = null;
-    relayout();
-  }
-
-  /** Nudge Meet to re-measure its containers after the box change. */
-  function relayout() {
-    window.dispatchEvent(new Event("resize"));
-    setTimeout(() => window.dispatchEvent(new Event("resize")), 150);
-  }
-
-  function openPanel() {
-    if (panelHost) return;
-    panelHost = document.createElement("winday-panel");
-    panelHost.style.cssText = [
-      "position:fixed",
-      "top:0",
-      "right:0",
-      "bottom:0",
-      `width:${PANEL_WIDTH}px`,
-      "max-width:85vw",
-      "z-index:2147483646",
-      "background:#F9F8F7",
-      "border-left:1px solid #E0E0E0",
-      "box-shadow:-10px 0 30px rgba(0,0,0,.10)",
-      "display:block",
-    ].join(";");
-    const frame = document.createElement("iframe");
-    frame.src = chrome.runtime.getURL("sidepanel/sidepanel.html");
-    frame.style.cssText = "width:100%;height:100%;border:0;display:block;background:transparent;";
-    panelHost.appendChild(frame);
-    document.documentElement.appendChild(panelHost);
-    applyPush();
-  }
-
-  function closePanel() {
-    if (!panelHost) return;
-    panelHost.remove();
-    panelHost = null;
-    removePush();
-  }
-
-  api.open = openPanel;
-  api.close = closePanel;
-
-  // --- Pill ---------------------------------------------------------------
 
   function detectInCall() {
     return /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\/|$)/.test(location.pathname);
@@ -203,9 +118,9 @@
       if (state.meetingId) b.append(button("Réessayer", "", () => send("WN_RETRY", { id: state.meetingId })));
       b.append(button("✕", "ghost", () => send("WN_DISMISS")));
     } else {
-      // idle + in a call: open the docked panel (record button lives there).
+      // idle + in a call: open the companion panel (record button lives there).
       const label = document.createElement("span"); label.textContent = "Winday Notetaker";
-      const open = button("Ouvrir le panneau", "", () => openPanel());
+      const open = button("Ouvrir le panneau", "", () => send("WN_OPEN_PANEL"));
       b.append(label, open);
     }
   }
@@ -231,11 +146,6 @@
     if (msg?.type === "WN_STATE") {
       state = msg.state || { phase: "idle" };
       render();
-    }
-    if (msg?.type === "WN_TOGGLE_PANEL") {
-      if (msg.ensure === "open") openPanel();
-      else if (msg.ensure === "close") closePanel();
-      else panelHost ? closePanel() : openPanel();
     }
   });
 

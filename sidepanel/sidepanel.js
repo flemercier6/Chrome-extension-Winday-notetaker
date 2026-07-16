@@ -1,11 +1,11 @@
-// The panel UI. Two hosting modes, same file:
-//   1. Docked in the Meet page — the content script embeds this page as an
-//      iframe fixed to the right edge and pushes the page content aside with a
-//      margin (works in Arc, which doesn't render Chrome's native side panel).
-//   2. Full-tab dashboard — opened by the toolbar icon on non-Meet tabs.
+// The panel UI, hosted in a COMPANION WINDOW: the service worker shrinks the
+// call's browser window by the panel width and docks this popup beside it — a
+// real push, independent of the page's own layout code (Meet computes its
+// layout in JS from window.innerWidth, which CSS tricks can't change; Arc has
+// no native side-panel UI at all).
 // Responsibilities: sign-in, the record trigger (start is delegated to the
-// service worker, which mints the tab-capture stream id), live recording and
-// pipeline status, and the recordings list.
+// service worker, which resolves the call's tab and mints the capture stream),
+// live recording and pipeline status, and the recordings list.
 import * as sb from "../lib/supabase.js";
 import * as store from "../lib/store.js";
 
@@ -142,33 +142,17 @@ function itemRow(m) {
 
 // --- Actions -------------------------------------------------------------
 
-/** The tab to record: when the panel is embedded in the Meet page, that page's
- *  own tab; when open as a full-tab dashboard, the window's active tab. */
-async function targetTab() {
-  const cur = await chrome.tabs.getCurrent().catch(() => null);
-  if (cur && /^https:\/\/meet\.google\.com\//.test(cur.url || "")) return cur;
-  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return active || null;
-}
-
 async function startRecording() {
-  const tab = await targetTab();
-  if (!tab || !/^https?:/.test(tab.url || "")) {
-    return recorderHint("Ouvrez l'onglet de votre réunion (Google Meet), puis réessayez.");
-  }
-  // The stream id is minted by the service worker: silently via tabCapture
-  // when the tab carries the activeTab grant (icon / context menu / shortcut),
-  // otherwise through the native share picker — pick the call's tab there and
-  // keep "share audio" enabled.
+  // The service worker resolves the call's tab (the one this panel was opened
+  // from, else any open Meet tab) and mints the capture stream: silently when
+  // the tab carries the activeTab grant (icon / context menu / ⌘⇧9), otherwise
+  // through the native share picker.
   recorderHint("Si un sélecteur s'ouvre : choisissez l'onglet du call et cliquez Partager.", false);
   const r = await chrome.runtime
-    .sendMessage({ type: "WN_RECORD_TAB", tabId: tab.id, title: deriveTitle(tab) })
+    .sendMessage({ type: "WN_RECORD_TAB" })
     .catch((e) => ({ ok: false, error: String(e?.message || e) }));
   if (!r || r.ok === false) {
-    recorderHint(
-      (r?.error || "Impossible de capturer cet onglet.") +
-      " Astuce fiable : clic droit sur la page du call → « Winday Notetaker — Enregistrer ce call ».",
-    );
+    recorderHint(r?.error || "Impossible de capturer l'onglet du call.");
   }
 }
 
@@ -202,11 +186,6 @@ async function doSignIn(kind) {
 
 // --- Helpers -------------------------------------------------------------
 
-function deriveTitle(tab) {
-  let t = (tab.title || "").replace(/\s*[-–]\s*Google Meet\s*$/i, "").replace(/^Meet\s*[-–]\s*/i, "").trim();
-  if (!t || /^meet\.google\.com/i.test(t)) t = `Meeting ${new Date().toLocaleString()}`;
-  return t;
-}
 function subtitle(m) {
   const parts = [];
   if (m.calendar?.companyName) parts.push(m.calendar.companyName);
@@ -258,11 +237,9 @@ $("btn-signout").addEventListener("click", async () => { sb.signOut(); await sto
 $("btn-settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
 $("mic-link").addEventListener("click", (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
 
-// Embedded in the Meet page (iframe): show ✕, which asks the host page —
-// via the service worker — to undock the panel.
-if (window.parent !== window) {
-  $("btn-close").classList.remove("hidden");
-  $("btn-close").addEventListener("click", () => chrome.runtime.sendMessage({ type: "WN_CLOSE_PANEL" }).catch(() => {}));
-}
+// ✕ closes the companion window; the service worker gives the freed width
+// back to the call's window.
+$("btn-close").classList.remove("hidden");
+$("btn-close").addEventListener("click", () => chrome.runtime.sendMessage({ type: "WN_CLOSE_PANEL" }).catch(() => {}));
 
 refresh();
