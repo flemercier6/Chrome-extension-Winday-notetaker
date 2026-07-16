@@ -5,7 +5,7 @@
 // content scripts share the page's localStorage, so we read it and forward it
 // to the service worker. No changes to the web app are needed.
 //
-// Flow: the panel's "Se connecter avec Winday" button opens the CRM in a popup
+// Flow: the panel's "Sign in with Winday" button opens the CRM in a popup
 // window; this script grabs the session (immediately if the user is already
 // logged in, otherwise once they finish logging in) and hands it back. The
 // extension then keeps the session alive on its own via the refresh token.

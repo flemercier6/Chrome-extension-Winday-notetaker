@@ -34,13 +34,13 @@ async function save() {
 let savedTimer = null;
 function flashSaved() {
   const el = $("saved");
-  el.textContent = "✓ Enregistré";
+  el.textContent = "✓ Saved";
   clearTimeout(savedTimer);
-  savedTimer = setTimeout(() => (el.textContent = "Les réglages sont enregistrés automatiquement."), 1200);
+  savedTimer = setTimeout(() => (el.textContent = "Settings are saved automatically."), 1200);
 }
 
 function updateMicStatus(granted) {
-  $("mic-status").textContent = granted ? "✓ Micro autorisé" : "Non autorisé";
+  $("mic-status").textContent = granted ? "✓ Microphone allowed" : "Not allowed";
   $("btn-mic").disabled = granted;
 }
 
@@ -49,7 +49,7 @@ async function requestMic() {
     await requestMicPermission(); // reports WN_MIC_GRANTED -> background persists + broadcasts
     updateMicStatus(true);
   } catch (e) {
-    $("mic-status").textContent = "Refusé : " + (e?.message || e);
+    $("mic-status").textContent = "Denied: " + (e?.message || e);
   }
 }
 

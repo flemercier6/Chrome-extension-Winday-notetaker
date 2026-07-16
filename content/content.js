@@ -156,24 +156,24 @@
       label.textContent = stageLabel(state.stage);
       b.append(sp, label);
     } else if (phase === "done") {
-      const ok = document.createElement("span"); ok.textContent = "✅ Notes prêtes"; ok.style.fontWeight = "600";
+      const ok = document.createElement("span"); ok.textContent = "✅ Notes ready"; ok.style.fontWeight = "600";
       b.append(ok);
       if (state.notionURL) {
-        const a = document.createElement("a"); a.href = state.notionURL; a.target = "_blank"; a.textContent = "Ouvrir dans Notion";
+        const a = document.createElement("a"); a.href = state.notionURL; a.target = "_blank"; a.textContent = "Open in Notion";
         b.append(a);
       }
       b.append(button("✕", "ghost", () => send("WN_DISMISS")));
     } else if (phase === "failed") {
-      const warn = document.createElement("span"); warn.textContent = "⚠︎ Échec du traitement";
+      const warn = document.createElement("span"); warn.textContent = "⚠︎ Processing failed";
       b.append(warn);
-      if (state.meetingId) b.append(button("Réessayer", "", () => send("WN_RETRY", { id: state.meetingId })));
+      if (state.meetingId) b.append(button("Retry", "", () => send("WN_RETRY", { id: state.meetingId })));
       b.append(button("✕", "ghost", () => send("WN_DISMISS")));
     } else {
       // idle + in a call: open the panel (record button lives there). The
       // service worker decides the mode: native side panel (Chrome/Dia) or,
       // for browsers that don't render it (Arc), our docked iframe.
       const label = document.createElement("span"); label.textContent = "Winday Meet";
-      const open = button("Ouvrir le panneau", "", async () => {
+      const open = button("Open panel", "", async () => {
         const r = await send("WN_OPEN_PANEL");
         if (!r || r.mode === "docked" || r.ok === false) openPanel();
       });
@@ -191,8 +191,8 @@
 
   function stageLabel(stage) {
     return (
-      { uploading: "Préparation…", transcribing: "Transcription…", summarizing: "Résumé…", exporting: "Enregistrement des notes…" }[stage] ||
-      "Traitement…"
+      { uploading: "Preparing…", transcribing: "Transcribing…", summarizing: "Summarizing…", exporting: "Saving notes…" }[stage] ||
+      "Processing…"
     );
   }
 

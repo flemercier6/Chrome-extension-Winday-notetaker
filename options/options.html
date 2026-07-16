@@ -2,76 +2,76 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Winday Meet — Réglages</title>
+    <title>Winday Meet — Settings</title>
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
     <main>
       <div class="brand">
         <img src="../icons/icon48.png" width="24" height="24" alt="" />
-        <h1>Winday Meet — Réglages</h1>
+        <h1>Winday Meet — Settings</h1>
       </div>
 
       <section class="card">
         <h2>Microphone</h2>
-        <p class="muted">Autorisez le micro pour capter <b>votre voix</b> (canal « You »). Sans ça, seul l'audio des participants est enregistré.</p>
+        <p class="muted">Allow the microphone to capture <b>your voice</b> (the "You" channel). Without it, only the participants' audio is recorded.</p>
         <div class="row">
-          <button id="btn-mic" class="primary">Autoriser le microphone</button>
+          <button id="btn-mic" class="primary">Allow microphone</button>
           <span id="mic-status" class="muted"></span>
         </div>
       </section>
 
       <section class="card">
-        <h2>Affichage du panneau</h2>
+        <h2>Panel display</h2>
         <label>Mode
           <select id="panelMode">
-            <option value="native">Panneau latéral natif (Dia, Chrome)</option>
-            <option value="docked">Intégré à la page (Arc)</option>
+            <option value="native">Native side panel (Dia, Chrome)</option>
+            <option value="docked">Embedded in the page (Arc)</option>
           </select>
         </label>
-        <p class="muted small">Le mode natif utilise le side panel du navigateur (il pousse la page).
-        Si votre navigateur ne l'affiche pas (Arc), choisissez « Intégré à la page ».</p>
+        <p class="muted small">Native mode uses the browser's side panel (it pushes the page aside).
+        If your browser doesn't show it (Arc), choose "Embedded in the page".</p>
       </section>
 
       <section class="card">
         <h2>Notion</h2>
-        <label>ID de la base de données Notion
-          <input id="notionDatabaseID" type="text" placeholder="ex: 24f1a2b3c4d5..." />
+        <label>Notion database ID
+          <input id="notionDatabaseID" type="text" placeholder="e.g. 24f1a2b3c4d5..." />
         </label>
         <label class="check">
           <input id="autoExportToNotion" type="checkbox" />
-          Envoyer automatiquement les notes vers Notion après le résumé
+          Automatically send notes to Notion after the summary
         </label>
       </section>
 
       <section class="card">
-        <h2>Résumé (Gemini)</h2>
-        <label>Consigne envoyée à Gemini
+        <h2>Summary (Gemini)</h2>
+        <label>Instructions sent to Gemini
           <textarea id="summaryPrompt" rows="6"></textarea>
         </label>
         <div class="row">
-          <button id="btn-reset-prompt" class="ghost small">Réinitialiser la consigne</button>
+          <button id="btn-reset-prompt" class="ghost small">Reset instructions</button>
         </div>
-        <label>Longueur du résumé
+        <label>Summary length
           <select id="summaryLength">
-            <option value="short">Court</option>
-            <option value="medium">Moyen</option>
+            <option value="short">Short</option>
+            <option value="medium">Medium</option>
             <option value="long">Long</option>
           </select>
         </label>
       </section>
 
       <section class="card">
-        <h2>Modèles</h2>
-        <label>Modèle Deepgram (transcription)
+        <h2>Models</h2>
+        <label>Deepgram model (transcription)
           <input id="deepgramModel" type="text" />
         </label>
-        <label>Modèle Gemini (résumé)
+        <label>Gemini model (summary)
           <input id="geminiModel" type="text" />
         </label>
       </section>
 
-      <p id="saved" class="saved muted">Les réglages sont enregistrés automatiquement.</p>
+      <p id="saved" class="saved muted">Settings are saved automatically.</p>
     </main>
     <script type="module" src="options.js"></script>
   </body>

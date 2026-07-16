@@ -10,6 +10,14 @@
   font-style: normal;
   font-display: swap;
 }
+/* Charis SIL (serif) — used for the sign-in title. Latin subset, OFL. */
+@font-face {
+  font-family: "Charis SIL";
+  src: url("../fonts/charis-sil.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 :root {
   --bg-page: #faf9f5;
   --bg-surface: #faf9f5;
@@ -41,7 +49,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; width: 100%; }
 body {
   margin: 0;
   font-family: var(--font);
@@ -52,7 +60,9 @@ body {
   -webkit-font-smoothing: antialiased;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
 }
+#app, section { min-width: 0; width: 100%; }
 .hidden { display: none !important; }
 .muted { color: var(--text-muted); }
 .small { font-size: 11px; line-height: 16px; }
@@ -162,17 +172,27 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 footer { text-align: right; }
 
-/* Sign-in hero */
-.signin-hero {
-  display: flex; flex-direction: column; align-items: stretch; gap: 10px;
-  max-width: 320px; margin: 8vh auto 0; text-align: center;
+/* Sign-in — centered vertically + horizontally in the panel */
+#signin {
+  flex: 1; display: grid; place-items: center;
+  overflow: auto; padding: 24px; box-sizing: border-box;
 }
-.signin-hero .brand { justify-content: center; margin-bottom: 2px; }
-.signin-lead { font-size: 13px; line-height: 19px; }
+.signin-hero {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  width: min(300px, 100%); text-align: center;
+}
+/* The custom connection illustration, inlined so its ink follows the brand
+   colour (CSS fill overrides the SVG's own fill="black"). */
+.signin-icon {
+  width: 96px; height: auto; margin-bottom: 6px; flex: none;
+}
+.signin-icon path { fill: var(--brand-solid); }
+.signin-title { font-family: "Charis SIL", Georgia, "Times New Roman", serif; font-size: 30px; line-height: 34px; font-weight: 400; letter-spacing: 0; margin: 0; }
+.signin-lead { font-size: 13px; line-height: 19px; margin: 0 0 4px; }
 button.block { width: 100%; display: block; flex: none; }
 #signin-hint { text-align: center; margin: 0; }
 a.link { color: var(--text-brand); text-decoration: none; font-weight: 500; cursor: pointer; }
 a.link:hover { text-decoration: underline; }
-#email-form { margin-top: 6px; text-align: left; }
+#email-form { margin-top: 6px; text-align: left; width: 100%; }
 #email-form .row { justify-content: stretch; }
 #email-form .row button { flex: 1; }

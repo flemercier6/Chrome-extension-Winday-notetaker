@@ -80,8 +80,8 @@ function renderRecorder() {
   if (phase === "recording") {
     const status = div("status");
     status.append(span("dot"), timeEl());
-    const stop = btn("Arrêter et enregistrer", "stop", () => chrome.runtime.sendMessage({ type: "WN_STOP" }));
-    const cancel = btn("Annuler (ne pas garder)", "ghost", () => chrome.runtime.sendMessage({ type: "WN_CANCEL" }));
+    const stop = btn("Stop & save", "stop", () => chrome.runtime.sendMessage({ type: "WN_STOP" }));
+    const cancel = btn("Cancel (don't keep)", "ghost", () => chrome.runtime.sendMessage({ type: "WN_CANCEL" }));
     box.append(status, stop, cancel);
   } else if (phase === "processing") {
     const status = div("status");
@@ -89,22 +89,22 @@ function renderRecorder() {
     box.append(status);
   } else if (phase === "done") {
     const status = div("status");
-    status.append(text("✅ Notes prêtes"));
+    status.append(text("✅ Notes ready"));
     box.append(status);
-    if (state.notionURL) box.append(linkBtn("Ouvrir dans Notion", state.notionURL));
+    if (state.notionURL) box.append(linkBtn("Open in Notion", state.notionURL));
     box.append(btn("OK", "ghost", () => chrome.runtime.sendMessage({ type: "WN_DISMISS" })));
   } else if (phase === "failed") {
     const status = div("status");
-    status.append(text("⚠︎ " + (state.error || "Échec du traitement")));
+    status.append(text("⚠︎ " + (state.error || "Processing failed")));
     box.append(status);
-    if (state.meetingId) box.append(btn("Réessayer", "record", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: state.meetingId })));
-    box.append(btn("Ignorer", "ghost", () => chrome.runtime.sendMessage({ type: "WN_DISMISS" })));
+    if (state.meetingId) box.append(btn("Retry", "record", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: state.meetingId })));
+    box.append(btn("Dismiss", "ghost", () => chrome.runtime.sendMessage({ type: "WN_DISMISS" })));
   } else {
-    const rec = btn("● Enregistrer cet appel", "record", startRecording);
+    const rec = btn("● Record this call", "record", startRecording);
     box.append(rec);
     const hint = document.createElement("div");
     hint.className = "hint";
-    hint.textContent = "Ouvrez l'onglet de votre Google Meet, puis lancez l'enregistrement.";
+    hint.textContent = "Open your Google Meet tab, then start recording.";
     box.append(hint);
   }
 }
@@ -116,7 +116,7 @@ function renderList() {
   if (items.length === 0) {
     const e = document.createElement("div");
     e.className = "empty";
-    e.textContent = "Aucun enregistrement pour le moment.";
+    e.textContent = "No recordings yet.";
     list.append(e);
     return;
   }
@@ -130,7 +130,7 @@ function itemRow(m) {
   main.style.overflow = "hidden";
   const title = document.createElement("div");
   title.className = "title";
-  title.textContent = m.title || "Sans titre";
+  title.textContent = m.title || "Untitled";
   const sub = document.createElement("div");
   sub.className = "sub";
   sub.textContent = subtitle(m);
@@ -145,12 +145,12 @@ function itemRow(m) {
   const busy = ["transcribing", "summarizing", "exporting"].includes(m.status);
   if (!busy) {
     if (m.status === "recorded" || m.status === "failed")
-      actions.append(iconBtn("↻", "Transcrire & résumer", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: m.id })));
+      actions.append(iconBtn("↻", "Transcribe & summarize", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: m.id })));
     if (m.status === "ready" && !m.notionPageURL)
-      actions.append(iconBtn("➤", "Envoyer vers Notion", () => chrome.runtime.sendMessage({ type: "WN_EXPORT", id: m.id })));
-    if (m.notionPageURL) actions.append(iconLink("⧉", "Ouvrir dans Notion", m.notionPageURL));
-    actions.append(iconLink("◫", "Ouvrir dans le CRM", crmURL(m)));
-    const del = iconBtn("🗑", "Supprimer", () => chrome.runtime.sendMessage({ type: "WN_DISCARD", id: m.id }));
+      actions.append(iconBtn("➤", "Send to Notion", () => chrome.runtime.sendMessage({ type: "WN_EXPORT", id: m.id })));
+    if (m.notionPageURL) actions.append(iconLink("⧉", "Open in Notion", m.notionPageURL));
+    actions.append(iconLink("◫", "Open in CRM", crmURL(m)));
+    const del = iconBtn("🗑", "Delete", () => chrome.runtime.sendMessage({ type: "WN_DISCARD", id: m.id }));
     del.classList.add("del");
     actions.append(del);
   }
@@ -175,25 +175,25 @@ async function startRecording() {
     .catch((e) => ({ ok: false, error: String(e?.message || e) }));
   if (r?.ok) return;
   if (!r?.needsPickerFallback) {
-    return recorderHint(r?.error || "Impossible de capturer l'onglet du call.");
+    return recorderHint(r?.error || "Couldn't capture the call tab.");
   }
 
   // 2) Fallback: capture HERE via the standard share dialog. Works embedded
   //    in the Meet tab (one-click, preferCurrentTab) and in the native side
   //    panel (generic picker). A full-tab dashboard has no call to point at.
   if (isTabPage) {
-    return recorderHint("Ouvrez le panneau depuis l'onglet du call, puis relancez.");
+    return recorderHint("Open the panel from the call tab, then try again.");
   }
-  recorderHint("Dans la fenêtre de partage : choisissez l'onglet du call et laissez « Partager l'audio » activé.", false);
+  recorderHint("In the share dialog, pick the call tab and keep 'Share audio' on.", false);
   let tabStream;
   try {
     tabStream = await captureThisTab();
   } catch (e) {
-    return recorderHint("Partage annulé (" + String(e?.message || e) + ") — relancez et cliquez « Partager ».");
+    return recorderHint("Sharing canceled (" + String(e?.message || e) + ") — try again and click 'Share'.");
   }
   if (tabStream.getAudioTracks().length === 0) {
     tabStream.getTracks().forEach((t) => t.stop());
-    return recorderHint("Aucun audio partagé — relancez et laissez « Partager l'audio de l'onglet » activé.");
+    return recorderHint("No audio shared — try again and keep 'Share tab audio' on.");
   }
   // Only the audio matters; drop the mandatory video track right away.
   tabStream.getVideoTracks().forEach((t) => t.stop());
@@ -291,15 +291,15 @@ function subtitle(m) {
 }
 function statusTag(status) {
   switch (status) {
-    case "exported": return { cls: "exported", label: "Dans Notion" };
-    case "ready": return { cls: "ready", label: "Résumé" };
-    case "failed": return { cls: "failed", label: "Échec" };
-    case "transcribing": case "summarizing": case "exporting": return { cls: "busy", label: "Traitement…" };
-    default: return { cls: "recorded", label: "Non traité" };
+    case "exported": return { cls: "exported", label: "In Notion" };
+    case "ready": return { cls: "ready", label: "Summary" };
+    case "failed": return { cls: "failed", label: "Failed" };
+    case "transcribing": case "summarizing": case "exporting": return { cls: "busy", label: "Processing…" };
+    default: return { cls: "recorded", label: "Not processed" };
   }
 }
 function stageLabel(stage) {
-  return { uploading: "Préparation…", transcribing: "Transcription…", summarizing: "Résumé…", exporting: "Enregistrement des notes…" }[stage] || "Traitement…";
+  return { uploading: "Preparing…", transcribing: "Transcribing…", summarizing: "Summarizing…", exporting: "Saving notes…" }[stage] || "Processing…";
 }
 function crmURL(m) {
   return `https://crm.winday.app/meetings?m=${(m.id || "").toLowerCase()}`;
@@ -343,16 +343,25 @@ async function openSettings() {
 
 // --- Events --------------------------------------------------------------
 
+// Feedback line under the sign-in button. Empty and hidden by default (no
+// standing instructions) — it only appears once there's a status/error to show.
+function signinHint(msg) {
+  const el = $("signin-hint");
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+
 // Web sign-in: open the Winday CRM in a popup; its content script bridges the
 // session back (WN_WEB_SESSION -> stored -> WN_STATE broadcast -> render flips
 // this panel to the signed-in view). No password handled by the extension.
 $("btn-web-signin").addEventListener("click", async () => {
-  $("signin-hint").textContent = "Fenêtre Winday ouverte — connectez-vous, puis revenez ici.";
+  signinHint("Winday window opened — sign in, then come back here.");
   const r = await chrome.runtime
     .sendMessage({ type: "WN_SIGN_IN_WEB" })
     .catch((e) => ({ ok: false, error: String(e?.message || e) }));
   if (!r || r.ok === false) {
-    $("signin-hint").textContent = "Impossible d'ouvrir la fenêtre de connexion" + (r?.error ? " (" + r.error + ")" : "") + ".";
+    signinHint("Couldn't open the sign-in window" + (r?.error ? " (" + r.error + ")" : "") + ".");
   }
 });
 $("toggle-email").addEventListener("click", (e) => {
@@ -370,7 +379,7 @@ $("btn-settings").addEventListener("click", openSettings);
 
 // Grant the mic permission INLINE — no navigation to a separate settings page.
 // That page-hop (via chrome.runtime.openOptionsPage()) is what left users
-// stuck: on some Chromium forks it silently no-ops, so "l'activer" looked
+// stuck: on some Chromium forks it silently no-ops, so "enable it" looked
 // like it did nothing. getUserMedia's own browser prompt appears right here.
 $("mic-link").addEventListener("click", async (e) => {
   e.preventDefault();
@@ -381,8 +390,8 @@ $("mic-link").addEventListener("click", async (e) => {
     render();
   } catch (err) {
     $("mic-banner-error").textContent =
-      "Micro refusé (" + (err?.message || err) + "). Vérifiez l'icône du microphone/cadenas " +
-      "dans la barre d'adresse, ou l'autorisation Microphone de ce site dans les réglages du navigateur.";
+      "Microphone denied (" + (err?.message || err) + "). Check the microphone/lock icon " +
+      "in the address bar, or this site's Microphone permission in your browser settings.";
     $("mic-banner-error").classList.remove("hidden");
   }
 });

@@ -134,7 +134,7 @@ async function handle(msg, sender) {
 
     case "WN_WEB_SESSION": {
       const s = msg.session;
-      if (!s || !s.accessToken || !s.refreshToken) return { ok: false, error: "Session invalide." };
+      if (!s || !s.accessToken || !s.refreshToken) return { ok: false, error: "Invalid session." };
       await store.setSession(s);
       broadcast();
       // Close the sign-in popup we opened (best-effort).
@@ -151,7 +151,7 @@ async function handle(msg, sender) {
       // the call's tab), tell the panel to run the getDisplayMedia fallback
       // itself — the share dialog needs no grant.
       const tab = await resolveMeetTab(msg.tabId, sender);
-      if (!tab) return { ok: false, error: "Aucun onglet Google Meet trouvé — ouvrez votre call, puis réessayez." };
+      if (!tab) return { ok: false, error: "No Google Meet tab found — open your call, then try again." };
       try {
         const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
         return await beginRecording({ streamId, title: msg.title || titleFromTab(tab), calendar: msg.calendar });
@@ -378,13 +378,13 @@ function ensureMenus() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: "wn-record",
-      title: "Winday Meet — Enregistrer ce call",
+      title: "Winday Meet — Record this call",
       contexts: ["page"],
       documentUrlPatterns: ["https://meet.google.com/*"],
     });
     chrome.contextMenus.create({
       id: "wn-panel",
-      title: "Winday Meet — Ouvrir le panneau",
+      title: "Winday Meet — Open the panel",
       contexts: ["page"],
       documentUrlPatterns: ["https://meet.google.com/*"],
     });
