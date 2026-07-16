@@ -1,11 +1,14 @@
-// Content script for meet.google.com: the floating pill (top center, shadow
-// DOM) mirroring the recorder state — idle -> recording (timer + stop) ->
-// processing -> done/failed. The panel itself is a COMPANION WINDOW managed by
-// the service worker (it shrinks the call's window and docks beside it — a
-// real push that Meet's JS-driven layout can't defeat); the pill's button just
-// asks for it (WN_OPEN_PANEL).
+// Content script for meet.google.com. Two jobs:
 //
-// Wrapped in a guard so a re-injection never redeclares top-level bindings.
+// 1. The floating pill (top center, shadow DOM): shows the recorder state —
+//    idle -> recording (timer + stop) -> processing -> done/failed.
+// 2. The DOCKED PANEL: the panel UI (sidepanel/sidepanel.html) embedded as an
+//    iframe fixed to the right edge, over the page. The ✕ HIDES the iframe
+//    instead of destroying it: a fallback (getDisplayMedia) recording runs
+//    INSIDE that iframe, and must survive the panel being dismissed.
+//
+// Wrapped in a guard so the background can re-inject it (chrome.scripting)
+// into tabs whose copy went stale without redeclaring top-level bindings.
 (() => {
   if (window.__windayNotetaker) {
     return;
@@ -14,11 +17,53 @@
   window.__windayNotetaker = api;
 
   const ACCENT = "#0077FF";
+  const PANEL_WIDTH = 380;
 
-  let host, root, els;
+  let host, root, els; // pill
+  let panelHost = null; // docked panel (kept alive once created)
   let state = { phase: "idle" };
   let inCall = false;
   let tick = null;
+
+  // --- Docked panel -------------------------------------------------------
+
+  function openPanel() {
+    if (panelHost) {
+      panelHost.style.display = "block";
+      return;
+    }
+    panelHost = document.createElement("winday-panel");
+    panelHost.style.cssText = [
+      "position:fixed",
+      "top:0",
+      "right:0",
+      "bottom:0",
+      `width:${PANEL_WIDTH}px`,
+      "max-width:85vw",
+      "z-index:2147483646",
+      "background:#F9F8F7",
+      "border-left:1px solid #E0E0E0",
+      "box-shadow:-10px 0 30px rgba(0,0,0,.10)",
+      "display:block",
+    ].join(";");
+    const frame = document.createElement("iframe");
+    frame.src = chrome.runtime.getURL("sidepanel/sidepanel.html");
+    // Let the embedded extension page use the mic and the share dialog for
+    // the fallback capture path.
+    frame.allow = "microphone; display-capture; autoplay";
+    frame.style.cssText = "width:100%;height:100%;border:0;display:block;background:transparent;";
+    panelHost.appendChild(frame);
+    document.documentElement.appendChild(panelHost);
+  }
+
+  function hidePanel() {
+    if (panelHost) panelHost.style.display = "none";
+  }
+
+  api.open = openPanel;
+  api.close = hidePanel;
+
+  // --- Pill ---------------------------------------------------------------
 
   function detectInCall() {
     return /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\/|$)/.test(location.pathname);
@@ -118,9 +163,9 @@
       if (state.meetingId) b.append(button("Réessayer", "", () => send("WN_RETRY", { id: state.meetingId })));
       b.append(button("✕", "ghost", () => send("WN_DISMISS")));
     } else {
-      // idle + in a call: open the companion panel (record button lives there).
+      // idle + in a call: open the docked panel (record button lives there).
       const label = document.createElement("span"); label.textContent = "Winday Notetaker";
-      const open = button("Ouvrir le panneau", "", () => send("WN_OPEN_PANEL"));
+      const open = button("Ouvrir le panneau", "", () => openPanel());
       b.append(label, open);
     }
   }
@@ -146,6 +191,12 @@
     if (msg?.type === "WN_STATE") {
       state = msg.state || { phase: "idle" };
       render();
+    }
+    if (msg?.type === "WN_TOGGLE_PANEL") {
+      if (msg.ensure === "open") openPanel();
+      else if (msg.ensure === "close") hidePanel();
+      else if (panelHost && panelHost.style.display !== "none") hidePanel();
+      else openPanel();
     }
   });
 

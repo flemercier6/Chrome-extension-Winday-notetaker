@@ -1,13 +1,18 @@
-// The panel UI, hosted in a COMPANION WINDOW: the service worker shrinks the
-// call's browser window by the panel width and docks this popup beside it — a
-// real push, independent of the page's own layout code (Meet computes its
-// layout in JS from window.innerWidth, which CSS tricks can't change; Arc has
-// no native side-panel UI at all).
-// Responsibilities: sign-in, the record trigger (start is delegated to the
-// service worker, which resolves the call's tab and mints the capture stream),
-// live recording and pipeline status, and the recordings list.
+// The panel UI. Hosted as an iframe the content script docks over the Meet
+// page (also usable as a full-tab dashboard from the toolbar icon elsewhere).
+// Responsibilities: sign-in, the record trigger, live recording and pipeline
+// status, and the recordings list.
+//
+// Recording starts through the service worker's SILENT path (tabCapture in
+// the offscreen document) whenever the call's tab carries the activeTab grant
+// (icon click / context menu / ⌘⇧9). When Chromium refuses, the panel runs
+// the fallback ITSELF: getDisplayMedia — the standard share dialog, which
+// needs no grant and exists in every Chromium (Arc included). Since the panel
+// iframe lives inside the Meet tab, `preferCurrentTab` offers that very tab
+// in one click, and the shared recording engine (lib/capture.js) runs here.
 import * as sb from "../lib/supabase.js";
 import * as store from "../lib/store.js";
+import { createRecorder, acquireMic } from "../lib/capture.js";
 
 const $ = (id) => document.getElementById(id);
 let state = { phase: "idle" };
@@ -37,6 +42,10 @@ chrome.runtime.onMessage.addListener((msg) => {
     state = msg.state || { phase: "idle" };
     store.getMeetings().then((m) => { meetings = m; render(); });
   }
+  // Stop/cancel routed by the service worker when THIS panel hosts the
+  // fallback recording.
+  if (msg?.type === "WN_PANEL_STOP") panelRecorder?.stop(false);
+  if (msg?.type === "WN_PANEL_CANCEL") panelRecorder?.stop(true);
 });
 
 // --- Render --------------------------------------------------------------
@@ -142,17 +151,87 @@ function itemRow(m) {
 
 // --- Actions -------------------------------------------------------------
 
+let panelRecorder = null;
+const isEmbedded = window.parent !== window;
+
 async function startRecording() {
-  // The service worker resolves the call's tab (the one this panel was opened
-  // from, else any open Meet tab) and mints the capture stream: silently when
-  // the tab carries the activeTab grant (icon / context menu / ⌘⇧9), otherwise
-  // through the native share picker.
-  recorderHint("Si un sélecteur s'ouvre : choisissez l'onglet du call et cliquez Partager.", false);
+  // 1) Silent path via the service worker (tabCapture -> offscreen).
   const r = await chrome.runtime
     .sendMessage({ type: "WN_RECORD_TAB" })
     .catch((e) => ({ ok: false, error: String(e?.message || e) }));
-  if (!r || r.ok === false) {
-    recorderHint(r?.error || "Impossible de capturer l'onglet du call.");
+  if (r?.ok) return;
+  if (!r?.needsPickerFallback) {
+    return recorderHint(r?.error || "Impossible de capturer l'onglet du call.");
+  }
+
+  // 2) Fallback: capture HERE via the standard share dialog. Only meaningful
+  //    when this panel is embedded in the Meet tab (preferCurrentTab = it).
+  if (!isEmbedded) {
+    return recorderHint("Ouvrez le panneau depuis l'onglet du call (pilule « Ouvrir le panneau »), puis relancez.");
+  }
+  recorderHint("Dans la fenêtre de partage : choisissez cet onglet et laissez « Partager l'audio » activé.", false);
+  let tabStream;
+  try {
+    tabStream = await captureThisTab();
+  } catch (e) {
+    return recorderHint("Partage annulé (" + String(e?.message || e) + ") — relancez et cliquez « Partager ».");
+  }
+  if (tabStream.getAudioTracks().length === 0) {
+    tabStream.getTracks().forEach((t) => t.stop());
+    return recorderHint("Aucun audio partagé — relancez et laissez « Partager l'audio de l'onglet » activé.");
+  }
+  // Only the audio matters; drop the mandatory video track right away.
+  tabStream.getVideoTracks().forEach((t) => t.stop());
+
+  const micStream = await acquireMic();
+  const meeting = {
+    id: crypto.randomUUID(),
+    title: r.title || `Meeting ${new Date().toLocaleString()}`,
+    startedAt: new Date().toISOString(),
+    calendar: null,
+  };
+  panelRecorder = createRecorder();
+  try {
+    await panelRecorder.start({
+      tabStream,
+      micStream,
+      monitorTab: false, // getDisplayMedia keeps local playback — no re-routing
+      meeting,
+      session: await store.getSession(),
+      settings: await store.getSettings(),
+    });
+  } catch (e) {
+    panelRecorder.failNow(e);
+    panelRecorder = null;
+    return;
+  }
+  recorderHint("", false);
+  await chrome.runtime
+    .sendMessage({ type: "WN_PANEL_REC_STARTED", meeting: { id: meeting.id, title: meeting.title, startedAt: meeting.startedAt } })
+    .catch(() => {});
+  // If the user stops the share from the browser bar (or the source ends),
+  // finish the meeting instead of recording silence.
+  const audioTrack = tabStream.getAudioTracks()[0];
+  audioTrack.addEventListener("ended", () => {
+    if (panelRecorder?.isActive()) panelRecorder.stop(false);
+  });
+}
+
+/** getDisplayMedia scoped to this iframe's top-level tab — the Meet tab. */
+async function captureThisTab() {
+  const base = { video: true, audio: true };
+  try {
+    return await navigator.mediaDevices.getDisplayMedia({
+      ...base,
+      preferCurrentTab: true,
+      selfBrowserSurface: "include",
+      systemAudio: "include",
+    });
+  } catch (e) {
+    // Older builds reject unknown dictionary members with a TypeError: retry
+    // with the plain form (generic picker; the user picks the call's tab).
+    if (e && e.name === "TypeError") return navigator.mediaDevices.getDisplayMedia(base);
+    throw e;
   }
 }
 

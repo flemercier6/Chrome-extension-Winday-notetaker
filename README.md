@@ -63,25 +63,25 @@ access is gated by Supabase Auth + RLS).
 
 ## Use
 
-Works in **Chrome** and in **Arc**. The panel is a **companion window**: opening
-it shrinks the call's browser window by 380 px and docks the panel in the freed
-strip, glued to it when the window moves or resizes. This is a *real* push — the
-page's viewport genuinely narrows, so Meet re-lays-out natively (a CSS-only
-push can't work: Meet computes its layout in JS from `window.innerWidth`, and
-Arc has no native side-panel UI at all). Closing the panel gives the width back.
+Works in **Chrome** and in **Arc**. The panel is an iframe docked over the right
+edge of the Meet page (Arc has no native side-panel UI, and Meet's JS-driven
+layout defeats CSS "push" tricks — so the panel overlays the page edge).
 
 1. Join a **Google Meet** call. A small pill appears at the top of the tab —
-   its **Ouvrir le panneau** button opens the companion panel. The toolbar icon
+   its **Ouvrir le panneau** button opens the docked panel. The toolbar icon
    and `⌘⇧9` do the same. **Sign in** in the panel with your Winday account
    (same credentials as the macOS app / CRM).
 2. Open **Settings** (⚙) once and click **Autoriser le microphone** so your side
    of the call is captured. Set your **Notion database ID** there too.
 3. Start recording — two ways:
-   - **Enregistrer cet appel** in the panel. If Chromium hasn't *invoked* the
-     extension on that tab yet, the native **share picker** opens as a fallback:
-     pick the call's tab (keep *share audio* enabled) and recording starts.
+   - **Enregistrer cet appel** in the panel. If Chromium refuses silent capture
+     (no prior icon/menu/shortcut gesture on that tab), the standard **share
+     dialog** opens as a fallback — `getDisplayMedia`, the same API Meet uses
+     for screen sharing, present in every Chromium including Arc. Pick the
+     call's tab, keep *Partager l'audio* enabled, **Partager** → recording
+     starts, hosted inside the panel iframe.
    - **Right‑click the call page → “Winday Notetaker — Enregistrer ce call”** —
-     fully silent (the menu click itself authorizes the capture, no picker).
+     fully silent (the menu click itself authorizes the capture, no dialog).
 4. The elapsed time stays visible in the panel and the pill; stop from either.
 5. When you stop, the extension uploads, transcribes, summarizes and (if
    enabled) exports to Notion. Progress and the result stay visible in the
@@ -91,12 +91,12 @@ Arc has no native side-panel UI at all). Closing the panel gives the width back.
 
 - **Capture authorization**: Chromium only allows *silent* tab capture on a tab
   where the extension was invoked (toolbar icon, right‑click menu item, `⌘⇧9` —
-  opening the panel with one of those counts). Without that grant, the panel's
-  record button falls back to the native share picker; if the browser has no
-  picker UI either, an actionable hint points to the two one‑gesture paths.
-  The right‑click menu path is always silent.
-- A **fullscreen** call window can't be shrunk — the panel then opens beside it
-  without pushing. Un‑fullscreen to get the docked layout.
+  opening the panel with one of those counts). Without that grant, the panel
+  falls back to the share dialog and records inside its own iframe.
+- **Fallback recordings live in the Meet tab**: the panel's ✕ only *hides* the
+  iframe (recording continues), but closing the call's tab before "Notes
+  prêtes" aborts an in‑flight fallback recording/pipeline. The silent path
+  (offscreen document) survives tab closes.
 - **Microphone permission** must be granted from the **Settings** page (a full
   tab) — extension pages are where Chrome shows the mic prompt. Without it, the
   call is still recorded (participants only); your voice just won't be on the
@@ -126,8 +126,9 @@ manifest.json          MV3 manifest
 config.js              publishable Supabase URL + anon key + model defaults
 background.js          service worker: offscreen lifecycle + message routing + state
 offscreen.html/.js     capture (tab + mic → stereo) + upload + pipeline
-content/content.js     meet.google.com: floating status pill (shadow DOM)
-sidepanel/             the panel UI, hosted in the companion window
+content/content.js     meet.google.com: status pill + docks the panel iframe
+sidepanel/             the panel UI (docked iframe / full‑tab dashboard)
+lib/capture.js         shared recording engine (offscreen + panel fallback)
 options/               settings: mic permission, Notion db, models, prompt
 lib/supabase.js        auth / storage / Edge Function REST client
 lib/pipeline.js        upload → transcribe → summarize → export orchestration

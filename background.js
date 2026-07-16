@@ -1,17 +1,21 @@
 // Service worker: the coordination hub. It owns the offscreen-document
-// lifecycle (where recording + the pipeline actually run), routes messages
-// between the popup, the Meet content script and the offscreen document, and
-// keeps a small "recorder state" that the UI reflects.
+// lifecycle, routes messages between the panel (an iframe the content script
+// docks over the Meet page), the pill and the offscreen recorder, and keeps a
+// small "recorder state" that every surface mirrors.
 //
-// Audio capture itself cannot happen here (service workers have no media APIs),
-// so the heavy lifting lives in offscreen.js. The tab's MediaStream id is minted
-// in the popup (which holds the user gesture + activeTab) and passed in.
+// Recording can live in TWO hosts:
+//   - offscreen document ("offscreen"): silent tabCapture path — used when the
+//     call's tab carries the activeTab grant (icon click / context menu / ⌘⇧9)
+//     or a Chromium that honors the meet.google.com host permission;
+//   - the panel iframe ("panel"): getDisplayMedia fallback — used when silent
+//     capture is refused, since the standard share dialog needs no grant and
+//     exists in every Chromium (Arc included).
 import * as store from "./lib/store.js";
 import { STAGE_LABELS } from "./lib/pipeline.js";
 
 const OFFSCREEN_PATH = "offscreen.html";
 
-// --- Recorder state (mirrored to storage so the popup survives SW restarts) --
+// --- Recorder state (mirrored to storage so the UI survives SW restarts) --
 
 let state = {
   phase: "idle", // idle | recording | processing | done | failed
@@ -21,6 +25,7 @@ let state = {
   stage: null, // pipeline stage key while processing
   notionURL: null,
   error: null,
+  recorderHost: null, // "offscreen" | "panel" while recording
 };
 
 async function loadState() {
@@ -35,9 +40,7 @@ async function setState(patch) {
 
 function broadcast() {
   const msg = { type: "WN_STATE", state };
-  // To the popup / options (extension pages).
   chrome.runtime.sendMessage(msg).catch(() => {});
-  // To every open Meet tab (content script).
   chrome.tabs.query({ url: "https://meet.google.com/*" }, (tabs) => {
     for (const t of tabs) chrome.tabs.sendMessage(t.id, msg).catch(() => {});
   });
@@ -46,11 +49,8 @@ function broadcast() {
 // --- Offscreen document lifecycle ---------------------------------------
 
 async function hasOffscreen() {
-  // getContexts is the reliable check on modern Chrome.
   if (chrome.runtime.getContexts) {
-    const contexts = await chrome.runtime.getContexts({
-      contextTypes: ["OFFSCREEN_DOCUMENT"],
-    });
+    const contexts = await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] });
     return contexts.length > 0;
   }
   return false;
@@ -90,66 +90,67 @@ async function handle(msg, sender) {
     }
 
     case "WN_RECORD_TAB": {
-      // The stream id is minted HERE in the service worker. Paths, in order:
-      //  1. tabCapture (silent) — authorized by the activeTab grant on the
-      //     call's tab (icon click / context menu / ⌘⇧9) or, on Chromium
-      //     builds that honor it, by the meet.google.com host permission.
-      //  2. The native share picker (desktopCapture) — no grant needed.
-      //  3. Both unavailable (e.g. Arc without a picker UI): an actionable
-      //     error telling the user the two one-gesture paths that DO grant.
-      const tab = await resolveMeetTab(msg.tabId);
+      // Try the SILENT path: mint a tabCapture stream id here and record in
+      // the offscreen document. When Chromium refuses (no activeTab grant on
+      // the call's tab), tell the panel to run the getDisplayMedia fallback
+      // itself — the share dialog needs no grant.
+      const tab = await resolveMeetTab(msg.tabId, sender);
       if (!tab) return { ok: false, error: "Aucun onglet Google Meet trouvé — ouvrez votre call, puis réessayez." };
       try {
         const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-        return await beginRecording({ streamId, captureSource: "tab", title: msg.title || titleFromTab(tab), calendar: msg.calendar });
+        return await beginRecording({ streamId, title: msg.title || titleFromTab(tab), calendar: msg.calendar });
       } catch (_) {
-        const picked = await chooseTabMedia();
-        if (!picked) {
-          return {
-            ok: false,
-            error:
-              "Chromium demande un geste d'autorisation : clic droit sur la page du call → " +
-              "« Winday Notetaker — Enregistrer ce call » (démarre aussitôt), ou ⌘⇧9 sur l'onglet du call puis réessayez ici.",
-          };
-        }
-        return beginRecording({ streamId: picked, captureSource: "desktop", title: msg.title || titleFromTab(tab), calendar: msg.calendar });
+        return { ok: false, needsPickerFallback: true, title: msg.title || titleFromTab(tab) };
       }
     }
 
-    case "WN_STOP":
-      if (state.phase === "recording") await sendToOffscreen({ type: "STOP" });
-      return { ok: true };
-
-    case "WN_CANCEL":
-      if (state.phase === "recording") await sendToOffscreen({ type: "CANCEL" });
-      await setState({ phase: "idle", meetingId: null, stage: null, error: null });
-      return { ok: true };
-
-    case "WN_DISMISS":
-      await setState({ phase: "idle", stage: null, error: null, notionURL: null });
-      return { ok: true };
-
-    // --- offscreen -> background lifecycle events ---
-    case "WN_REC_STARTED":
-      // Capture actually began (state is already "recording" from WN_START).
-      return { ok: true };
-
-    case "WN_REC_STAGE":
-      await setState({ phase: "processing", stage: msg.stage });
-      return { ok: true };
-
-    case "WN_REC_DONE":
-      // offscreen already saved the meeting to the store.
+    // The panel started a fallback (getDisplayMedia) recording in its iframe.
+    case "WN_PANEL_REC_STARTED":
       await setState({
-        phase: "done",
+        phase: "recording",
+        meetingId: msg.meeting?.id || null,
+        title: msg.meeting?.title || null,
+        startedAt: msg.meeting?.startedAt || new Date().toISOString(),
         stage: null,
-        notionURL: msg.notionURL || null,
+        notionURL: null,
         error: null,
+        recorderHost: "panel",
       });
       return { ok: true };
 
+    case "WN_STOP":
+      if (state.phase === "recording") {
+        if (state.recorderHost === "panel") chrome.runtime.sendMessage({ type: "WN_PANEL_STOP" }).catch(() => {});
+        else await sendToOffscreen({ type: "STOP" });
+      }
+      return { ok: true };
+
+    case "WN_CANCEL":
+      if (state.phase === "recording") {
+        if (state.recorderHost === "panel") chrome.runtime.sendMessage({ type: "WN_PANEL_CANCEL" }).catch(() => {});
+        else await sendToOffscreen({ type: "CANCEL" });
+      }
+      await setState({ phase: "idle", meetingId: null, stage: null, error: null, recorderHost: null });
+      return { ok: true };
+
+    case "WN_DISMISS":
+      await setState({ phase: "idle", stage: null, error: null, notionURL: null, recorderHost: null });
+      return { ok: true };
+
+    // --- recorder host -> background lifecycle events ---
+    case "WN_REC_STARTED":
+      return { ok: true };
+
+    case "WN_REC_STAGE":
+      await setState({ phase: "processing", stage: msg.stage, recorderHost: null });
+      return { ok: true };
+
+    case "WN_REC_DONE":
+      await setState({ phase: "done", stage: null, notionURL: msg.notionURL || null, error: null, recorderHost: null });
+      return { ok: true };
+
     case "WN_REC_FAILED":
-      await setState({ phase: "failed", stage: null, error: msg.error || "Processing failed." });
+      await setState({ phase: "failed", stage: null, error: msg.error || "Processing failed.", recorderHost: null });
       return { ok: true };
 
     // --- Actions on past meetings (run in offscreen so they survive) ---
@@ -178,7 +179,7 @@ async function handle(msg, sender) {
       broadcast();
       return { ok: true };
 
-    // --- offscreen -> background: persistence (offscreen has no chrome.storage) ---
+    // --- persistence relays (recorder hosts do not own chrome.storage) ---
     case "WN_MEETING_UPSERT":
       await store.upsertMeeting(msg.meeting);
       broadcast();
@@ -202,38 +203,20 @@ async function handle(msg, sender) {
       broadcast();
       return { ok: true };
 
-    // Open the companion panel window (from the pill or any UI).
-    case "WN_OPEN_PANEL":
-      await openPanelWindow(sender?.tab || null);
+    // The panel's ✕: ask its host page to hide the docked iframe.
+    case "WN_CLOSE_PANEL":
+      if (sender?.tab?.id != null) {
+        chrome.tabs.sendMessage(sender.tab.id, { type: "WN_TOGGLE_PANEL", ensure: "close" }).catch(() => {});
+      }
       return { ok: true };
-
-    // The panel's ✕: close the companion window (restore happens onRemoved).
-    case "WN_CLOSE_PANEL": {
-      const b = await getBinding();
-      if (b?.panelWindowId != null) chrome.windows.remove(b.panelWindowId).catch(() => {});
-      return { ok: true };
-    }
 
     default:
       return { ok: false, error: `Unknown message: ${msg.type}` };
   }
 }
 
-/** Shows the native share picker restricted to tabs (with the share-audio
- *  toggle). Resolves to a desktop-capture stream id, or null if cancelled. */
-function chooseTabMedia() {
-  return new Promise((resolve) => {
-    try {
-      chrome.desktopCapture.chooseDesktopMedia(["tab", "audio"], (streamId) => resolve(streamId || null));
-    } catch (_) {
-      resolve(null);
-    }
-  });
-}
-
-/** Starts a recording from an already-minted capture stream id.
- *  captureSource: "tab" (tabCapture) | "desktop" (share picker). */
-async function beginRecording({ streamId, captureSource = "tab", title, calendar }) {
+/** Starts an offscreen (silent-path) recording from a tabCapture stream id. */
+async function beginRecording({ streamId, title, calendar }) {
   if (state.phase === "recording") return { ok: false, error: "Already recording." };
   const session = await store.getSession();
   if (!session) return { ok: false, error: "Sign in first." };
@@ -253,137 +236,29 @@ async function beginRecording({ streamId, captureSource = "tab", title, calendar
     stage: null,
     notionURL: null,
     error: null,
+    recorderHost: "offscreen",
   });
-  await sendToOffscreen({ type: "START", streamId, captureSource, meeting, session, settings });
+  await sendToOffscreen({ type: "START", streamId, meeting, session, settings });
   return { ok: true, meetingId: meeting.id };
 }
 
-// --- Companion panel window ----------------------------------------------
-// A CSS-only "push" cannot work on Meet: its layout is computed in JS from
-// window.innerWidth, which no stylesheet can change — shrunk boxes just get
-// overflowed and the panel ends up looking like an overlay. The only push
-// that works everywhere (Arc included, which has no native side-panel UI) is
-// at the WINDOW level: shrink the call's browser window by the panel width
-// and dock a popup window in the freed strip. Meet then re-lays-out natively,
-// exactly as when the user narrows the window by hand.
+// --- Meet tab helpers, toolbar icon, context menu ------------------------
 
 const MEET_URL = /^https:\/\/meet\.google\.com\//;
-const PANEL_WIDTH = 380;
-const MIN_MAIN_WIDTH = 520;
 
 function isMeetTab(tab) {
   return !!tab?.id && MEET_URL.test(tab.url || "");
 }
 
-async function getBinding() {
-  return (await chrome.storage.local.get("wn_panel_binding")).wn_panel_binding || null;
-}
-async function saveBinding(b) {
-  await chrome.storage.local.set({ wn_panel_binding: b });
-}
-async function clearBinding() {
-  await chrome.storage.local.remove("wn_panel_binding");
-}
-
-/** Opens (or focuses) the companion panel window next to `fromTab`'s window,
- *  shrinking that window to make room — a real push, independent of page CSS. */
-async function openPanelWindow(fromTab) {
-  const existing = await getBinding();
-  if (existing?.panelWindowId != null) {
-    try {
-      await chrome.windows.update(existing.panelWindowId, { focused: true });
-      if (fromTab && isMeetTab(fromTab) && existing.meetTabId !== fromTab.id) {
-        existing.meetTabId = fromTab.id;
-        await saveBinding(existing);
-      }
-      return;
-    } catch (_) {
-      await clearBinding(); // stale binding (window already gone)
-    }
-  }
-
-  let main;
-  try {
-    main = fromTab
-      ? await chrome.windows.get(fromTab.windowId)
-      : await chrome.windows.getLastFocused();
-  } catch (_) {
-    main = await chrome.windows.getLastFocused();
-  }
-
-  // A maximized window refuses width updates on some platforms — normalize.
-  if (main.state === "maximized") {
-    await chrome.windows.update(main.id, { state: "normal" }).catch(() => {});
-    main = await chrome.windows.get(main.id);
-  }
-
-  let mainWidth = main.width;
-  let restoreWidth = null;
-  if (main.state !== "fullscreen" && main.width - PANEL_WIDTH >= MIN_MAIN_WIDTH) {
-    restoreWidth = main.width;
-    mainWidth = main.width - PANEL_WIDTH;
-    await chrome.windows.update(main.id, { width: mainWidth }).catch(() => {});
-  }
-
-  const panel = await chrome.windows.create({
-    url: chrome.runtime.getURL("sidepanel/sidepanel.html"),
-    type: "popup",
-    width: PANEL_WIDTH,
-    height: main.height,
-    left: (main.left ?? 0) + mainWidth,
-    top: main.top ?? 0,
-    focused: true,
-  });
-
-  await saveBinding({
-    panelWindowId: panel.id,
-    mainWindowId: main.id,
-    meetTabId: fromTab && isMeetTab(fromTab) ? fromTab.id : null,
-    restoreWidth,
-  });
-}
-
-// Keep the panel glued to the call window when the latter moves or resizes.
-chrome.windows.onBoundsChanged?.addListener(async (win) => {
-  const b = await getBinding();
-  if (!b || win.id !== b.mainWindowId || b.panelWindowId == null) return;
-  chrome.windows
-    .update(b.panelWindowId, {
-      left: (win.left ?? 0) + (win.width ?? 0),
-      top: win.top ?? 0,
-      height: win.height,
-    })
-    .catch(() => {});
-});
-
-// Closing either window unwinds the pair: panel closed -> give the width back;
-// call window closed -> close the panel.
-chrome.windows.onRemoved.addListener(async (winId) => {
-  const b = await getBinding();
-  if (!b) return;
-  if (winId === b.panelWindowId) {
-    if (b.mainWindowId != null && b.restoreWidth != null) {
-      chrome.windows.update(b.mainWindowId, { width: b.restoreWidth }).catch(() => {});
-    }
-    await clearBinding();
-  } else if (winId === b.mainWindowId) {
-    if (b.panelWindowId != null) chrome.windows.remove(b.panelWindowId).catch(() => {});
-    await clearBinding();
-  }
-});
-
-/** The tab to record: explicit id, else the tab the panel was opened from,
- *  else any open Meet tab (audible first, then most recently used). */
-async function resolveMeetTab(explicitId) {
+/** The tab to record: explicit id, else the panel's host tab (the panel is an
+ *  iframe inside the Meet page, so sender.tab IS the call's tab), else any
+ *  open Meet tab (audible first, then most recently used). */
+async function resolveMeetTab(explicitId, sender) {
   if (explicitId != null) {
     const tab = await chrome.tabs.get(explicitId).catch(() => null);
     if (tab) return tab;
   }
-  const b = await getBinding();
-  if (b?.meetTabId != null) {
-    const tab = await chrome.tabs.get(b.meetTabId).catch(() => null);
-    if (isMeetTab(tab)) return tab;
-  }
+  if (isMeetTab(sender?.tab)) return sender.tab;
   const meetTabs = await new Promise((resolve) =>
     chrome.tabs.query({ url: "https://meet.google.com/*" }, resolve),
   );
@@ -398,11 +273,30 @@ function titleFromTab(tab) {
   return t;
 }
 
-// Toolbar icon (and ⌘⇧9 via _execute_action): opens the companion panel.
-// On a Meet tab this click is ALSO the activeTab grant that unlocks silent
-// tab capture for the record button.
+/** Opens the docked panel in a Meet tab, injecting the content script if the
+ *  copy in the page went stale (e.g. after an extension reload). */
+async function openPanelInTab(tab) {
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: "WN_TOGGLE_PANEL", ensure: "open" });
+  } catch (_) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content/content.js"] });
+      await chrome.tabs.sendMessage(tab.id, { type: "WN_TOGGLE_PANEL", ensure: "open" });
+    } catch (_) {
+      /* tab not reachable */
+    }
+  }
+}
+
+// Toolbar icon (and ⌘⇧9 via _execute_action): on a Meet tab, open the docked
+// panel — that click is ALSO the activeTab grant that unlocks silent capture.
+// Elsewhere, open the same UI as a full-tab dashboard.
 chrome.action.onClicked.addListener(async (tab) => {
-  await openPanelWindow(tab || null);
+  if (isMeetTab(tab)) {
+    await openPanelInTab(tab);
+  } else {
+    chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel/sidepanel.html") });
+  }
 });
 
 function ensureMenus() {
@@ -426,20 +320,20 @@ function ensureMenus() {
 chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
   if (!isMeetTab(tab)) return;
   if (info.menuItemId === "wn-panel") {
-    await openPanelWindow(tab);
+    await openPanelInTab(tab);
     return;
   }
   if (info.menuItemId === "wn-record") {
-    // The menu click grants activeTab on the call's tab: capture silently,
-    // then surface the panel so the live status is visible.
+    // The menu click grants activeTab: capture silently, then surface the
+    // panel so the live status is visible.
+    await openPanelInTab(tab);
     if (state.phase === "recording") return;
     try {
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-      await beginRecording({ streamId, captureSource: "tab", title: titleFromTab(tab) });
+      await beginRecording({ streamId, title: titleFromTab(tab) });
     } catch (e) {
       await setState({ phase: "failed", stage: null, error: String(e?.message || e) });
     }
-    await openPanelWindow(tab);
   }
 });
 

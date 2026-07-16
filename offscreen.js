@@ -1,52 +1,30 @@
-// The recording + processing worker. Runs inside an offscreen document (a
-// persistent page context) so it survives service-worker suspension for the
-// whole multi-minute pipeline.
+// The offscreen recording host: consumes tabCapture stream ids (the SILENT
+// capture path) and runs the shared recording engine. Living outside any tab,
+// it survives tab closes and service-worker suspensions for the whole
+// multi-minute pipeline. It has NO chrome.storage access — the background
+// hands it session + settings in each message, and every persistable change
+// goes back through the WN_* report protocol.
 //
-// Offscreen documents have NO access to chrome.storage — only chrome.runtime
-// messaging. So this worker is stateless w.r.t. storage: the background hands it
-// the session + settings + meeting in each message, it does capture + fetch
-// only, and it reports every persistable change back to the background (which
-// owns chrome.storage).
-//
-// Capture model (mirrors the macOS app's two-channel WAV): the mixed recording
-// is STEREO where the LEFT channel is your microphone ("You") and the RIGHT
-// channel is the meeting tab audio (the other participants). transcribe runs
-// Deepgram with multichannel=true, so channel 0 = "You" and channel 1 = the
-// others — exactly what the shared backend expects.
+// Retry / export of PAST meetings also run here (pure fetch work).
 import * as pipeline from "./lib/pipeline.js";
-import * as sb from "./lib/supabase.js";
+import { createRecorder, acquireMic, configureSession, report } from "./lib/capture.js";
 
-let mediaRecorder = null;
-let chunks = [];
-let audioContext = null;
-let tabStream = null;
-let micStream = null;
-let destStream = null;
-let currentMeeting = null;
-let currentSettings = null;
-let cancelled = false;
-
-function report(message) {
-  chrome.runtime.sendMessage(message).catch(() => {});
-}
-
-// Configure the REST client's session and mirror any token refresh back to the
-// background so it gets persisted to chrome.storage.
-function configureSession(session) {
-  sb.useSession(session, (s) => report({ type: "WN_SESSION_REFRESHED", session: s }));
-}
+let recorder = null;
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.target !== "offscreen") return;
   switch (msg.type) {
     case "START":
-      startRecording(msg).catch((e) => failNow(e));
+      startRecording(msg).catch((e) => {
+        if (recorder) recorder.failNow(e);
+        else report({ type: "WN_REC_FAILED", error: String(e?.message || e) });
+      });
       break;
     case "STOP":
-      stopRecording(false);
+      recorder?.stop(false);
       break;
     case "CANCEL":
-      stopRecording(true);
+      recorder?.stop(true);
       break;
     case "RETRY":
       retryMeeting(msg).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
@@ -57,141 +35,25 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 });
 
-function pickMimeType() {
-  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
-  for (const c of candidates) {
-    if (window.MediaRecorder && MediaRecorder.isTypeSupported(c)) return c;
-  }
-  return "audio/webm";
-}
+async function startRecording({ streamId, meeting, session, settings }) {
+  // Tab audio (the remote participants) minted by chrome.tabCapture.
+  const tabStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId },
+    },
+    video: false,
+  });
+  const micStream = await acquireMic();
 
-async function startRecording({ streamId, captureSource = "tab", meeting, session, settings }) {
-  configureSession(session);
-  currentSettings = settings;
-  currentMeeting = { ...meeting, status: "recording" };
-  report({ type: "WN_MEETING_UPSERT", meeting: currentMeeting });
-
-  // 1) Tab audio (the remote participants). Two id flavors:
-  //    - "tab": from chrome.tabCapture (silent path, needs the activeTab grant)
-  //    - "desktop": from the native share picker (chrome.desktopCapture) — a
-  //      video track MUST be requested alongside the audio, we stop it at once.
-  if (captureSource === "desktop") {
-    tabStream = await navigator.mediaDevices.getUserMedia({
-      audio: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: streamId } },
-      video: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: streamId } },
-    });
-    for (const t of tabStream.getVideoTracks()) t.stop();
-  } else {
-    tabStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId },
-      },
-      video: false,
-    });
-  }
-
-  // 2) Microphone (your side) — best-effort; record tab-only if unavailable.
-  try {
-    micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      video: false,
-    });
-    report({ type: "WN_MIC_GRANTED" });
-  } catch (_) {
-    micStream = null;
-  }
-
-  // 3) Mix into a 2-channel stream: L = mic ("You"), R = tab (the others).
-  audioContext = new AudioContext();
-  const merger = audioContext.createChannelMerger(2);
-  if (micStream) {
-    audioContext.createMediaStreamSource(micStream).connect(merger, 0, 0);
-  }
-  const tabSource = audioContext.createMediaStreamSource(tabStream);
-  tabSource.connect(merger, 0, 1);
-  if (captureSource === "tab") {
-    // tabCapture silences the tab's normal playback; route it to the speakers
-    // so you still HEAR the call while it records. (The desktop/picker path
-    // keeps local playback — routing it again would double the audio.)
-    tabSource.connect(audioContext.destination);
-  }
-
-  const dest = audioContext.createMediaStreamDestination();
-  merger.connect(dest);
-  destStream = dest.stream;
-
-  // 4) Record.
-  chunks = [];
-  mediaRecorder = new MediaRecorder(destStream, { mimeType: pickMimeType() });
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) chunks.push(e.data);
-  };
-  mediaRecorder.onstop = () => finalizeRecording();
-  mediaRecorder.start(1000); // gather ~1s chunks
-
-  report({ type: "WN_REC_STARTED" });
-}
-
-function stopRecording(isCancel) {
-  cancelled = isCancel;
-  if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    mediaRecorder.stop(); // triggers onstop -> finalizeRecording
-  } else {
-    teardownStreams();
-  }
-}
-
-function teardownStreams() {
-  for (const s of [tabStream, micStream, destStream]) {
-    if (s) s.getTracks().forEach((t) => t.stop());
-  }
-  tabStream = micStream = destStream = null;
-  if (audioContext) {
-    audioContext.close().catch(() => {});
-    audioContext = null;
-  }
-}
-
-async function finalizeRecording() {
-  const localChunks = chunks;
-  chunks = [];
-  const meeting = currentMeeting;
-  currentMeeting = null;
-  const wasCancelled = cancelled;
-  cancelled = false;
-
-  teardownStreams();
-
-  if (wasCancelled || !meeting) {
-    if (meeting) report({ type: "WN_MEETING_REMOVE", id: meeting.id });
-    return;
-  }
-
-  const blob = new Blob(localChunks, { type: "audio/webm" });
-  meeting.endedAt = new Date().toISOString();
-  meeting.status = "recorded";
-  report({ type: "WN_MEETING_UPSERT", meeting });
-
-  if (blob.size === 0) {
-    const failed = { ...meeting, status: "failed", errorMessage: "The recording was empty — no audio was captured." };
-    report({ type: "WN_MEETING_UPSERT", meeting: failed });
-    report({ type: "WN_REC_FAILED", error: failed.errorMessage });
-    return;
-  }
-
-  try {
-    const result = await pipeline.process(blob, meeting, {
-      settings: currentSettings,
-      onStage: (stage) => report({ type: "WN_REC_STAGE", stage }),
-    });
-    report({ type: "WN_MEETING_UPSERT", meeting: result });
-    if (result.errorMessage) report({ type: "WN_REC_FAILED", error: result.errorMessage });
-    else report({ type: "WN_REC_DONE", notionURL: result.notionPageURL || null, meetingId: result.id });
-  } catch (e) {
-    const failed = { ...meeting, status: "failed", errorMessage: String(e?.message || e) };
-    report({ type: "WN_MEETING_UPSERT", meeting: failed });
-    report({ type: "WN_REC_FAILED", error: failed.errorMessage });
-  }
+  recorder = createRecorder();
+  await recorder.start({
+    tabStream,
+    micStream,
+    monitorTab: true, // tabCapture silences the tab; keep the call audible
+    meeting,
+    session,
+    settings,
+  });
 }
 
 async function retryMeeting({ meeting, session, settings }) {
@@ -223,15 +85,4 @@ async function exportMeeting({ meeting, session, settings }) {
   } catch (e) {
     report({ type: "WN_REC_FAILED", error: String(e?.message || e) });
   }
-}
-
-function failNow(e) {
-  teardownStreams();
-  const err = String(e?.message || e);
-  if (currentMeeting) {
-    const failed = { ...currentMeeting, status: "failed", errorMessage: err };
-    currentMeeting = null;
-    report({ type: "WN_MEETING_UPSERT", meeting: failed });
-  }
-  report({ type: "WN_REC_FAILED", error: err });
 }
