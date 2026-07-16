@@ -92,8 +92,9 @@ async function handle(msg, sender) {
     case "WN_START": {
       // msg: { streamId, tabId, title, calendar? }
       if (state.phase === "recording") return { ok: false, error: "Already recording." };
+      const session = await store.getSession();
+      if (!session) return { ok: false, error: "Sign in first." };
       const settings = await store.getSettings();
-      const micGranted = await store.getMicGranted();
       const meeting = {
         id: crypto.randomUUID(),
         title: msg.title || `Meeting ${new Date().toLocaleString()}`,
@@ -114,8 +115,8 @@ async function handle(msg, sender) {
         type: "START",
         streamId: msg.streamId,
         meeting,
+        session,
         settings,
-        micGranted,
       });
       return { ok: true, meetingId: meeting.id };
     }
@@ -134,6 +135,10 @@ async function handle(msg, sender) {
       return { ok: true };
 
     // --- offscreen -> background lifecycle events ---
+    case "WN_REC_STARTED":
+      // Capture actually began (state is already "recording" from WN_START).
+      return { ok: true };
+
     case "WN_REC_STAGE":
       await setState({ phase: "processing", stage: msg.stage });
       return { ok: true };
@@ -153,19 +158,49 @@ async function handle(msg, sender) {
       return { ok: true };
 
     // --- Actions on past meetings (run in offscreen so they survive) ---
-    case "WN_RETRY":
+    case "WN_RETRY": {
+      const meeting = (await store.getMeetings()).find((m) => m.id === msg.id);
+      const session = await store.getSession();
+      if (!meeting || !session) return { ok: false, error: "Not available." };
       await ensureOffscreen();
-      await sendToOffscreen({ type: "RETRY", meetingId: msg.id });
+      await setState({ phase: "processing", meetingId: meeting.id, stage: null, error: null });
+      await sendToOffscreen({ type: "RETRY", meeting, session, settings: await store.getSettings() });
       return { ok: true };
+    }
 
-    case "WN_EXPORT":
+    case "WN_EXPORT": {
+      const meeting = (await store.getMeetings()).find((m) => m.id === msg.id);
+      const session = await store.getSession();
+      if (!meeting || !session) return { ok: false, error: "Not available." };
       await ensureOffscreen();
-      await sendToOffscreen({ type: "EXPORT", meetingId: msg.id });
+      await setState({ phase: "processing", meetingId: meeting.id, stage: "exporting", error: null });
+      await sendToOffscreen({ type: "EXPORT", meeting, session, settings: await store.getSettings() });
       return { ok: true };
+    }
 
     case "WN_DISCARD":
       await store.removeMeeting(msg.id);
       broadcast();
+      return { ok: true };
+
+    // --- offscreen -> background: persistence (offscreen has no chrome.storage) ---
+    case "WN_MEETING_UPSERT":
+      await store.upsertMeeting(msg.meeting);
+      broadcast();
+      return { ok: true };
+
+    case "WN_MEETING_REMOVE":
+      await store.removeMeeting(msg.id);
+      broadcast();
+      return { ok: true };
+
+    case "WN_MIC_GRANTED":
+      await store.setMicGranted(true);
+      broadcast();
+      return { ok: true };
+
+    case "WN_SESSION_REFRESHED":
+      if (msg.session) await store.setSession(msg.session);
       return { ok: true };
 
     case "WN_SETTINGS_CHANGED":

@@ -2,13 +2,19 @@
 // persistent page context) so it survives service-worker suspension for the
 // whole multi-minute pipeline.
 //
+// Offscreen documents have NO access to chrome.storage — only chrome.runtime
+// messaging. So this worker is stateless w.r.t. storage: the background hands it
+// the session + settings + meeting in each message, it does capture + fetch
+// only, and it reports every persistable change back to the background (which
+// owns chrome.storage).
+//
 // Capture model (mirrors the macOS app's two-channel WAV): the mixed recording
 // is STEREO where the LEFT channel is your microphone ("You") and the RIGHT
 // channel is the meeting tab audio (the other participants). transcribe runs
 // Deepgram with multichannel=true, so channel 0 = "You" and channel 1 = the
 // others — exactly what the shared backend expects.
-import * as store from "./lib/store.js";
 import * as pipeline from "./lib/pipeline.js";
+import * as sb from "./lib/supabase.js";
 
 let mediaRecorder = null;
 let chunks = [];
@@ -17,10 +23,17 @@ let tabStream = null;
 let micStream = null;
 let destStream = null;
 let currentMeeting = null;
+let currentSettings = null;
+let cancelled = false;
 
 function report(message) {
-  // Fire-and-forget to the service worker (which mirrors it to the UI).
   chrome.runtime.sendMessage(message).catch(() => {});
+}
+
+// Configure the REST client's session and mirror any token refresh back to the
+// background so it gets persisted to chrome.storage.
+function configureSession(session) {
+  sb.useSession(session, (s) => report({ type: "WN_SESSION_REFRESHED", session: s }));
 }
 
 chrome.runtime.onMessage.addListener((msg) => {
@@ -36,10 +49,10 @@ chrome.runtime.onMessage.addListener((msg) => {
       stopRecording(true);
       break;
     case "RETRY":
-      retryMeeting(msg.meetingId).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
+      retryMeeting(msg).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
       break;
     case "EXPORT":
-      exportMeeting(msg.meetingId).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
+      exportMeeting(msg).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
       break;
   }
 });
@@ -52,9 +65,11 @@ function pickMimeType() {
   return "audio/webm";
 }
 
-async function startRecording({ streamId, meeting, settings }) {
+async function startRecording({ streamId, meeting, session, settings }) {
+  configureSession(session);
+  currentSettings = settings;
   currentMeeting = { ...meeting, status: "recording" };
-  await store.upsertMeeting(currentMeeting);
+  report({ type: "WN_MEETING_UPSERT", meeting: currentMeeting });
 
   // 1) Tab audio (the remote participants).
   tabStream = await navigator.mediaDevices.getUserMedia({
@@ -70,7 +85,7 @@ async function startRecording({ streamId, meeting, settings }) {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       video: false,
     });
-    await store.setMicGranted(true);
+    report({ type: "WN_MIC_GRANTED" });
   } catch (_) {
     micStream = null;
   }
@@ -103,8 +118,6 @@ async function startRecording({ streamId, meeting, settings }) {
   report({ type: "WN_REC_STARTED" });
 }
 
-let cancelled = false;
-
 function stopRecording(isCancel) {
   cancelled = isCancel;
   if (mediaRecorder && mediaRecorder.state !== "inactive") {
@@ -136,76 +149,63 @@ async function finalizeRecording() {
   teardownStreams();
 
   if (wasCancelled || !meeting) {
-    if (meeting) await store.removeMeeting(meeting.id);
+    if (meeting) report({ type: "WN_MEETING_REMOVE", id: meeting.id });
     return;
   }
 
   const blob = new Blob(localChunks, { type: "audio/webm" });
   meeting.endedAt = new Date().toISOString();
   meeting.status = "recorded";
-  await store.upsertMeeting(meeting);
+  report({ type: "WN_MEETING_UPSERT", meeting });
 
   if (blob.size === 0) {
-    meeting.status = "failed";
-    meeting.errorMessage = "The recording was empty — no audio was captured.";
-    await store.upsertMeeting(meeting);
-    report({ type: "WN_REC_FAILED", error: meeting.errorMessage });
+    const failed = { ...meeting, status: "failed", errorMessage: "The recording was empty — no audio was captured." };
+    report({ type: "WN_MEETING_UPSERT", meeting: failed });
+    report({ type: "WN_REC_FAILED", error: failed.errorMessage });
     return;
   }
 
-  await runPipeline(blob, meeting);
-}
-
-async function runPipeline(blob, meeting) {
-  const settings = await store.getSettings();
   try {
     const result = await pipeline.process(blob, meeting, {
-      settings,
+      settings: currentSettings,
       onStage: (stage) => report({ type: "WN_REC_STAGE", stage }),
     });
-    await store.upsertMeeting(result);
-    if (result.errorMessage) {
-      report({ type: "WN_REC_FAILED", error: result.errorMessage });
-    } else {
-      report({ type: "WN_REC_DONE", notionURL: result.notionPageURL || null, meetingId: result.id });
-    }
+    report({ type: "WN_MEETING_UPSERT", meeting: result });
+    if (result.errorMessage) report({ type: "WN_REC_FAILED", error: result.errorMessage });
+    else report({ type: "WN_REC_DONE", notionURL: result.notionPageURL || null, meetingId: result.id });
   } catch (e) {
     const failed = { ...meeting, status: "failed", errorMessage: String(e?.message || e) };
-    await store.upsertMeeting(failed);
+    report({ type: "WN_MEETING_UPSERT", meeting: failed });
     report({ type: "WN_REC_FAILED", error: failed.errorMessage });
   }
 }
 
-async function retryMeeting(id) {
-  const meetings = await store.getMeetings();
-  const meeting = meetings.find((m) => m.id === id);
+async function retryMeeting({ meeting, session, settings }) {
   if (!meeting) throw new Error("Meeting not found.");
-  const settings = await store.getSettings();
+  configureSession(session);
   try {
     const result = await pipeline.retry(meeting, {
       settings,
       onStage: (stage) => report({ type: "WN_REC_STAGE", stage }),
     });
-    await store.upsertMeeting(result);
+    report({ type: "WN_MEETING_UPSERT", meeting: result });
     report({ type: "WN_REC_DONE", notionURL: result.notionPageURL || null, meetingId: result.id });
   } catch (e) {
     const failed = { ...meeting, status: "failed", errorMessage: String(e?.message || e) };
-    await store.upsertMeeting(failed);
+    report({ type: "WN_MEETING_UPSERT", meeting: failed });
     report({ type: "WN_REC_FAILED", error: failed.errorMessage });
   }
 }
 
-async function exportMeeting(id) {
-  const meetings = await store.getMeetings();
-  const meeting = meetings.find((m) => m.id === id);
+async function exportMeeting({ meeting, session, settings }) {
   if (!meeting || !meeting.summary) throw new Error("Nothing to export yet.");
-  const settings = await store.getSettings();
+  configureSession(session);
   report({ type: "WN_REC_STAGE", stage: "exporting" });
   try {
     const url = await pipeline.exportToNotion(meeting, settings);
     const updated = { ...meeting, notionPageURL: url, status: "exported", errorMessage: null };
-    await store.upsertMeeting(updated);
-    report({ type: "WN_REC_DONE", notionURL: url, meetingId: id });
+    report({ type: "WN_MEETING_UPSERT", meeting: updated });
+    report({ type: "WN_REC_DONE", notionURL: url, meetingId: meeting.id });
   } catch (e) {
     report({ type: "WN_REC_FAILED", error: String(e?.message || e) });
   }
@@ -217,7 +217,7 @@ function failNow(e) {
   if (currentMeeting) {
     const failed = { ...currentMeeting, status: "failed", errorMessage: err };
     currentMeeting = null;
-    store.upsertMeeting(failed);
+    report({ type: "WN_MEETING_UPSERT", meeting: failed });
   }
   report({ type: "WN_REC_FAILED", error: err });
 }

@@ -165,6 +165,7 @@ async function doSignIn(kind) {
   $("btn-signin").disabled = $("btn-signup").disabled = true;
   try {
     session = kind === "up" ? await sb.signUp(email, password) : await sb.signIn(email, password);
+    await store.setSession(session); // the REST client keeps it in memory only; persist it here
     await refresh();
   } catch (e) {
     err.textContent = e?.message || String(e);
@@ -228,7 +229,7 @@ function linkBtn(label, url) { return btn(label, "record", () => chrome.tabs.cre
 $("btn-signin").addEventListener("click", () => doSignIn("in"));
 $("btn-signup").addEventListener("click", () => doSignIn("up"));
 $("password").addEventListener("keydown", (e) => { if (e.key === "Enter") doSignIn("in"); });
-$("btn-signout").addEventListener("click", async () => { await sb.signOut(); session = null; render(); });
+$("btn-signout").addEventListener("click", async () => { sb.signOut(); await store.setSession(null); session = null; render(); });
 $("btn-settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
 $("mic-link").addEventListener("click", (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
 
