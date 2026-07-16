@@ -9,17 +9,24 @@
     <div id="app">
       <!-- Signed-out view -->
       <section id="signin" class="hidden">
-        <div class="brand">
-          <img src="../icons/icon48.png" width="20" height="20" alt="" />
-          <span>Winday Meet</span>
-        </div>
-        <p class="muted small">Connectez-vous avec votre compte Winday.</p>
-        <input id="email" type="email" placeholder="Email" autocomplete="username" />
-        <input id="password" type="password" placeholder="Mot de passe" autocomplete="current-password" />
-        <div id="auth-error" class="error small hidden"></div>
-        <div class="row">
-          <button id="btn-signin" class="primary">Se connecter</button>
-          <button id="btn-signup" class="ghost">Créer un compte</button>
+        <div class="signin-hero">
+          <div class="brand">
+            <img src="../icons/icon48.png" width="22" height="22" alt="" />
+            <span>Winday Meet</span>
+          </div>
+          <p class="muted signin-lead">Connectez-vous à votre compte Winday pour enregistrer, transcrire et résumer vos appels.</p>
+          <button id="btn-web-signin" class="primary block">Se connecter avec Winday</button>
+          <p id="signin-hint" class="hint">Une fenêtre Winday s'ouvre pour la connexion — connectez-vous, puis revenez ici.</p>
+          <a href="#" id="toggle-email" class="link small">Se connecter par e-mail</a>
+          <div id="email-form" class="hidden">
+            <input id="email" type="email" placeholder="Email" autocomplete="username" />
+            <input id="password" type="password" placeholder="Mot de passe" autocomplete="current-password" />
+            <div id="auth-error" class="error small hidden"></div>
+            <div class="row">
+              <button id="btn-signin" class="primary">Se connecter</button>
+              <button id="btn-signup" class="ghost">Créer un compte</button>
+            </div>
+          </div>
         </div>
       </section>
 

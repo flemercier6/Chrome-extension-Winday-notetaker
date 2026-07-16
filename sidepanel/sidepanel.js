@@ -40,12 +40,14 @@ async function refresh() {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "WN_STATE") {
     state = msg.state || { phase: "idle" };
-    // Also re-read micGranted: granting it from ANY surface (this panel,
-    // another window, the options page) broadcasts WN_STATE, and every open
-    // panel should drop its banner without needing its own round trip.
-    Promise.all([store.getMeetings(), store.getMicGranted()]).then(([m, mic]) => {
+    // Re-read session + micGranted from storage: web sign-in stores the session
+    // in the service worker and broadcasts WN_STATE, and granting the mic from
+    // any surface does too — so every open panel flips to signed-in / drops its
+    // banner without its own round trip.
+    Promise.all([store.getMeetings(), store.getMicGranted(), store.getSession()]).then(([m, mic, sess]) => {
       meetings = m;
       micGranted = mic;
+      session = sess;
       render();
     });
   }
@@ -340,6 +342,25 @@ async function openSettings() {
 }
 
 // --- Events --------------------------------------------------------------
+
+// Web sign-in: open the Winday CRM in a popup; its content script bridges the
+// session back (WN_WEB_SESSION -> stored -> WN_STATE broadcast -> render flips
+// this panel to the signed-in view). No password handled by the extension.
+$("btn-web-signin").addEventListener("click", async () => {
+  $("signin-hint").textContent = "Fenêtre Winday ouverte — connectez-vous, puis revenez ici.";
+  const r = await chrome.runtime
+    .sendMessage({ type: "WN_SIGN_IN_WEB" })
+    .catch((e) => ({ ok: false, error: String(e?.message || e) }));
+  if (!r || r.ok === false) {
+    $("signin-hint").textContent = "Impossible d'ouvrir la fenêtre de connexion" + (r?.error ? " (" + r.error + ")" : "") + ".";
+  }
+});
+$("toggle-email").addEventListener("click", (e) => {
+  e.preventDefault();
+  const f = $("email-form");
+  f.classList.toggle("hidden");
+  if (!f.classList.contains("hidden")) $("email").focus();
+});
 
 $("btn-signin").addEventListener("click", () => doSignIn("in"));
 $("btn-signup").addEventListener("click", () => doSignIn("up"));

@@ -14,6 +14,10 @@ import * as store from "./lib/store.js";
 import { STAGE_LABELS } from "./lib/pipeline.js";
 
 const OFFSCREEN_PATH = "offscreen.html";
+// The Winday CRM web app (same Supabase project as the extension) — used for
+// web sign-in. winday-auth.js runs there and bridges the session back.
+const WINDAY_WEB_URL = "https://crm.winday.app/";
+let authWindowId = null; // the sign-in popup window, while open
 
 // --- Recorder state (mirrored to storage so the UI survives SW restarts) --
 
@@ -102,6 +106,43 @@ async function handle(msg, sender) {
         store.getMicGranted(),
       ]);
       return { ok: true, state, session, meetings, settings, micGranted };
+    }
+
+    // --- Web sign-in (Winday CRM, same Supabase project) ---
+    case "WN_SIGN_IN_WEB": {
+      // Open the CRM in a popup window. Its content script (winday-auth.js)
+      // reads the Supabase session from localStorage — instantly if the user
+      // is already logged in there, otherwise once they finish — and posts it
+      // back via WN_WEB_SESSION.
+      try {
+        if (authWindowId != null) {
+          await chrome.windows.update(authWindowId, { focused: true }).catch(() => {});
+          return { ok: true };
+        }
+        const win = await chrome.windows.create({
+          url: WINDAY_WEB_URL,
+          type: "popup",
+          width: 480,
+          height: 760,
+        });
+        authWindowId = win.id;
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e?.message || e) };
+      }
+    }
+
+    case "WN_WEB_SESSION": {
+      const s = msg.session;
+      if (!s || !s.accessToken || !s.refreshToken) return { ok: false, error: "Session invalide." };
+      await store.setSession(s);
+      broadcast();
+      // Close the sign-in popup we opened (best-effort).
+      if (authWindowId != null) {
+        chrome.windows.remove(authWindowId).catch(() => {});
+        authWindowId = null;
+      }
+      return { ok: true };
     }
 
     case "WN_RECORD_TAB": {
@@ -377,6 +418,11 @@ async function recordFromMenu(tab) {
 
 // Expose stage labels to any page that wants them via a getter message.
 export { STAGE_LABELS };
+
+// If the user closes the sign-in popup themselves, forget it.
+chrome.windows.onRemoved.addListener((winId) => {
+  if (winId === authWindowId) authWindowId = null;
+});
 
 function boot() {
   loadState();
