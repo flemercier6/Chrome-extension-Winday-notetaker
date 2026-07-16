@@ -65,19 +65,30 @@ function pickMimeType() {
   return "audio/webm";
 }
 
-async function startRecording({ streamId, meeting, session, settings }) {
+async function startRecording({ streamId, captureSource = "tab", meeting, session, settings }) {
   configureSession(session);
   currentSettings = settings;
   currentMeeting = { ...meeting, status: "recording" };
   report({ type: "WN_MEETING_UPSERT", meeting: currentMeeting });
 
-  // 1) Tab audio (the remote participants).
-  tabStream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId },
-    },
-    video: false,
-  });
+  // 1) Tab audio (the remote participants). Two id flavors:
+  //    - "tab": from chrome.tabCapture (silent path, needs the activeTab grant)
+  //    - "desktop": from the native share picker (chrome.desktopCapture) — a
+  //      video track MUST be requested alongside the audio, we stop it at once.
+  if (captureSource === "desktop") {
+    tabStream = await navigator.mediaDevices.getUserMedia({
+      audio: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: streamId } },
+      video: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: streamId } },
+    });
+    for (const t of tabStream.getVideoTracks()) t.stop();
+  } else {
+    tabStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamId },
+      },
+      video: false,
+    });
+  }
 
   // 2) Microphone (your side) — best-effort; record tab-only if unavailable.
   try {
@@ -98,9 +109,12 @@ async function startRecording({ streamId, meeting, session, settings }) {
   }
   const tabSource = audioContext.createMediaStreamSource(tabStream);
   tabSource.connect(merger, 0, 1);
-  // Capturing a tab's audio silences its normal playback; route it to the
-  // speakers so you still HEAR the call while it records.
-  tabSource.connect(audioContext.destination);
+  if (captureSource === "tab") {
+    // tabCapture silences the tab's normal playback; route it to the speakers
+    // so you still HEAR the call while it records. (The desktop/picker path
+    // keeps local playback — routing it again would double the audio.)
+    tabSource.connect(audioContext.destination);
+  }
 
   const dest = audioContext.createMediaStreamDestination();
   merger.connect(dest);

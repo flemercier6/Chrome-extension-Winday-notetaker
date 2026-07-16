@@ -75,10 +75,11 @@ still pushes the page content aside rather than overlaying it).
 2. Open **Settings** (⚙) once and click **Autoriser le microphone** so your side
    of the call is captured. Set your **Notion database ID** there too.
 3. Start recording — two ways:
-   - **Right‑click the call page → “Winday Notetaker — Enregistrer ce call”**
-     (recommended in Arc: it both authorizes the capture and starts it), or
-   - **Enregistrer cet appel** in the panel — works after the extension was
-     *invoked* once on that tab (toolbar icon click, context menu, or `⌘⇧9`).
+   - **Enregistrer cet appel** in the panel. If Chromium hasn't *invoked* the
+     extension on that tab yet, the native **share picker** opens as a fallback:
+     pick the call's tab (keep *share audio* enabled) and recording starts.
+   - **Right‑click the call page → “Winday Notetaker — Enregistrer ce call”** —
+     fully silent (the menu click itself authorizes the capture, no picker).
 4. The elapsed time stays visible in the panel and the pill; stop from either.
 5. When you stop, the extension uploads, transcribes, summarizes and (if
    enabled) exports to Notion. Progress and the result stay visible in the
@@ -86,11 +87,11 @@ still pushes the page content aside rather than overlaying it).
 
 ### Notes & limitations (v1)
 
-- **Capture authorization**: Chromium only allows tab capture on a tab where the
-  extension was *invoked* — a toolbar‑icon click, the right‑click menu item, or
-  the keyboard shortcut. The context‑menu path starts recording in the same
-  action, so it never hits this; the panel's record button needs one prior
-  invocation on the tab and otherwise shows a hint.
+- **Capture authorization**: Chromium only allows *silent* tab capture on a tab
+  where the extension was invoked (toolbar icon, right‑click menu item, `⌘⇧9`).
+  Without that grant, the panel's record button falls back to the native share
+  picker (`desktopCapture`) — one extra click, works everywhere including Arc.
+  The right‑click menu path is always silent.
 - On non‑Meet tabs, the toolbar icon opens the same UI as a full‑tab
   **dashboard** (recordings list, retry, export).
 - **Microphone permission** must be granted from the **Settings** page (a full

@@ -156,25 +156,27 @@ async function startRecording() {
   if (!tab || !/^https?:/.test(tab.url || "")) {
     return recorderHint("Ouvrez l'onglet de votre réunion (Google Meet), puis réessayez.");
   }
-  // The stream id is minted by the service worker — what authorizes it is the
-  // activeTab grant on the call's tab (icon click / context menu / shortcut).
+  // The stream id is minted by the service worker: silently via tabCapture
+  // when the tab carries the activeTab grant (icon / context menu / shortcut),
+  // otherwise through the native share picker — pick the call's tab there and
+  // keep "share audio" enabled.
+  recorderHint("Si un sélecteur s'ouvre : choisissez l'onglet du call et cliquez Partager.", false);
   const r = await chrome.runtime
     .sendMessage({ type: "WN_RECORD_TAB", tabId: tab.id, title: deriveTitle(tab) })
     .catch((e) => ({ ok: false, error: String(e?.message || e) }));
   if (!r || r.ok === false) {
     recorderHint(
-      "Impossible de capturer (" + (r?.error || "erreur inconnue") + "). " +
-      "Faites un clic droit sur la page du call → « Winday Notetaker — Enregistrer ce call », " +
-      "ou cliquez une fois sur l'icône de l'extension, puis réessayez.",
+      (r?.error || "Impossible de capturer cet onglet.") +
+      " Astuce fiable : clic droit sur la page du call → « Winday Notetaker — Enregistrer ce call ».",
     );
   }
 }
 
-function recorderHint(msg) {
+function recorderHint(msg, isError = true) {
   const box = $("recorder");
   const hint = box.querySelector(".hint") || document.createElement("div");
   hint.className = "hint";
-  hint.style.color = "#c0392b";
+  hint.style.color = isError ? "#c0392b" : "";
   hint.textContent = msg;
   if (!hint.parentNode) box.append(hint);
 }

@@ -27,6 +27,47 @@
   let tick = null;
 
   // --- Docked panel (pushes the page) ------------------------------------
+  //
+  // Pushing a page whose UI is `position: fixed` (Meet's control bar, stage…)
+  // takes more than a margin: fixed elements anchor to the VIEWPORT, so a
+  // margin on <html> leaves them spanning the full window and the panel just
+  // sits on top of them (overlay effect). The fix is the CSS containing-block
+  // rule: a TRANSFORMED element becomes the containing block for its fixed
+  // descendants. Giving <body> an identity transform + a reduced width makes
+  // every Meet element — in-flow AND fixed — lay out inside the shrunk box,
+  // while the panel and the pill (children of <html>, outside the transform)
+  // keep anchoring to the real viewport, in the freed right-hand strip.
+
+  let pushStyle = null;
+
+  function applyPush() {
+    if (pushStyle) return;
+    pushStyle = document.createElement("style");
+    pushStyle.id = "winday-push-style";
+    pushStyle.textContent = `
+      html { overflow-x: hidden !important; }
+      body {
+        width: calc(100% - ${PANEL_WIDTH}px) !important;
+        min-width: 0 !important;
+        transform: translate(0, 0) !important;
+      }
+    `;
+    document.documentElement.appendChild(pushStyle);
+    relayout();
+  }
+
+  function removePush() {
+    if (!pushStyle) return;
+    pushStyle.remove();
+    pushStyle = null;
+    relayout();
+  }
+
+  /** Nudge Meet to re-measure its containers after the box change. */
+  function relayout() {
+    window.dispatchEvent(new Event("resize"));
+    setTimeout(() => window.dispatchEvent(new Event("resize")), 150);
+  }
 
   function openPanel() {
     if (panelHost) return;
@@ -49,17 +90,14 @@
     frame.style.cssText = "width:100%;height:100%;border:0;display:block;background:transparent;";
     panelHost.appendChild(frame);
     document.documentElement.appendChild(panelHost);
-    // Push the page content aside (no overlay), then let Meet re-layout.
-    document.documentElement.style.setProperty("margin-right", `${PANEL_WIDTH}px`, "important");
-    window.dispatchEvent(new Event("resize"));
+    applyPush();
   }
 
   function closePanel() {
     if (!panelHost) return;
     panelHost.remove();
     panelHost = null;
-    document.documentElement.style.removeProperty("margin-right");
-    window.dispatchEvent(new Event("resize"));
+    removePush();
   }
 
   api.open = openPanel;

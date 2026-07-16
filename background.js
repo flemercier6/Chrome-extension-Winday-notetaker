@@ -91,17 +91,26 @@ async function handle(msg, sender) {
 
     case "WN_RECORD_TAB": {
       // msg: { tabId, title, calendar? } — the stream id is minted HERE in the
-      // service worker: what authorizes it is the activeTab grant on the target
-      // tab (from an icon click, the context menu or the keyboard shortcut),
-      // not which extension context asks. This also works when the panel runs
-      // as an iframe inside the Meet page (Arc-compatible layout).
-      let streamId;
+      // service worker. Two paths:
+      //  1. tabCapture (silent) — authorized by the activeTab grant on the
+      //     target tab (icon click, context menu or keyboard shortcut).
+      //  2. Without that grant (typical when the panel was opened from the
+      //     pill), Chromium refuses ("Extension has not been invoked…"); fall
+      //     back to the native share picker (desktopCapture), which needs no
+      //     invocation — the user picks the call's tab and recording starts.
       try {
-        streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: msg.tabId });
-      } catch (e) {
-        return { ok: false, error: String(e?.message || e) };
+        const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: msg.tabId });
+        return await beginRecording({ streamId, captureSource: "tab", title: msg.title, calendar: msg.calendar });
+      } catch (_) {
+        const picked = await chooseTabMedia();
+        if (!picked) {
+          return {
+            ok: false,
+            error: "Capture annulée — dans le sélecteur, choisissez l'onglet du call et laissez « Partager l'audio » activé.",
+          };
+        }
+        return beginRecording({ streamId: picked, captureSource: "desktop", title: msg.title, calendar: msg.calendar });
       }
-      return beginRecording({ streamId, title: msg.title, calendar: msg.calendar });
     }
 
     case "WN_STOP":
@@ -202,8 +211,21 @@ async function handle(msg, sender) {
   }
 }
 
-/** Starts a recording from an already-minted tab-capture stream id. */
-async function beginRecording({ streamId, title, calendar }) {
+/** Shows the native share picker restricted to tabs (with the share-audio
+ *  toggle). Resolves to a desktop-capture stream id, or null if cancelled. */
+function chooseTabMedia() {
+  return new Promise((resolve) => {
+    try {
+      chrome.desktopCapture.chooseDesktopMedia(["tab", "audio"], (streamId) => resolve(streamId || null));
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+/** Starts a recording from an already-minted capture stream id.
+ *  captureSource: "tab" (tabCapture) | "desktop" (share picker). */
+async function beginRecording({ streamId, captureSource = "tab", title, calendar }) {
   if (state.phase === "recording") return { ok: false, error: "Already recording." };
   const session = await store.getSession();
   if (!session) return { ok: false, error: "Sign in first." };
@@ -224,7 +246,7 @@ async function beginRecording({ streamId, title, calendar }) {
     notionURL: null,
     error: null,
   });
-  await sendToOffscreen({ type: "START", streamId, meeting, session, settings });
+  await sendToOffscreen({ type: "START", streamId, captureSource, meeting, session, settings });
   return { ok: true, meetingId: meeting.id };
 }
 
