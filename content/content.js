@@ -16,13 +16,25 @@
   const api = {};
   window.__windayNotetaker = api;
 
-  // Winday Data design-system tokens (brand blue is reserved for the mark,
-  // links and active states — primary actions are near-black).
-  const ACCENT = "#3670B2"; // brand/solid
-  const LINK = "#2E5F9C"; // text/brand
-  const INK = "#1F1E1D"; // text/primary + bg/inverse
-  const CREAM = "#FAF9F5"; // bg/surface + text/inverse
-  const DANGER = "#B4553F"; // status/danger
+  // Winday Data design-system palettes. The pill + docked panel live inside the
+  // Meet page, so they can't use the extension's theme.css — we resolve the
+  // user's Theme choice here and paint from these role-based tokens. Brand blue
+  // is reserved for the mark, links and active states; primary is inverse.
+  const PALETTES = {
+    light: {
+      cardBg: "#FAF9F5", cardBorder: "#D6D3CB", text: "#1F1E1D",
+      secondary: "#6E6D66", muted: "#9B9A93", accent: "#3670B2", link: "#2E5F9C",
+      danger: "#B4553F", inset: "#E8E6E0", btnBg: "#1F1E1D", btnText: "#FAF9F5",
+      onDanger: "#FAF9F5", panelBg: "#FAF9F5", panelBorder: "#D6D3CB", shadow: "rgba(31,30,29,.14)",
+    },
+    dark: {
+      cardBg: "#232220", cardBorder: "#3A3835", text: "#F2F1EC",
+      secondary: "#B4B2AA", muted: "#86847C", accent: "#5B9BD8", link: "#82B3E8",
+      danger: "#D98466", inset: "#333029", btnBg: "#F2F1EC", btnText: "#1F1E1D",
+      onDanger: "#1B1A18", panelBg: "#1B1A18", panelBorder: "#3A3835", shadow: "rgba(0,0,0,.45)",
+    },
+  };
+  let P = PALETTES.light; // active palette; set for real by initTheme() below
   const PANEL_WIDTH = 380;
 
   let host, root, els; // pill
@@ -47,8 +59,8 @@
       `width:${PANEL_WIDTH}px`,
       "max-width:85vw",
       "z-index:2147483646",
-      "background:#FAF9F5",
-      "border-left:1px solid #D6D3CB",
+      `background:${P.panelBg}`,
+      `border-left:1px solid ${P.panelBorder}`,
       "box-shadow:-10px 0 30px rgba(0,0,0,.10)",
       "display:block",
     ].join(";");
@@ -87,27 +99,27 @@
         * { box-sizing: border-box; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
         .card {
           display: inline-flex; align-items: center; gap: 12px;
-          background: ${CREAM}; border: 1px solid #D6D3CB; border-radius: 12px;
-          padding: 8px 12px; box-shadow: 0 6px 24px rgba(31,30,29,.14);
-          color: ${INK}; font-size: 14px; white-space: nowrap;
+          background: ${P.cardBg}; border: 1px solid ${P.cardBorder}; border-radius: 12px;
+          padding: 8px 12px; box-shadow: 0 6px 24px ${P.shadow};
+          color: ${P.text}; font-size: 14px; white-space: nowrap;
         }
         .logo { width: 18px; height: 18px; flex: 0 0 auto; }
-        .dot { width: 9px; height: 9px; border-radius: 999px; background: ${DANGER}; animation: pulse 1.2s ease-in-out infinite; }
+        .dot { width: 9px; height: 9px; border-radius: 999px; background: ${P.danger}; animation: pulse 1.2s ease-in-out infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
         .time { font-variant-numeric: tabular-nums; font-weight: 500; }
-        .spinner { width: 13px; height: 13px; border: 2px solid #E8E6E0; border-top-color: ${ACCENT}; border-radius: 999px; animation: spin .8s linear infinite; }
+        .spinner { width: 13px; height: 13px; border: 2px solid ${P.inset}; border-top-color: ${P.accent}; border-radius: 999px; animation: spin .8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         button {
           border: 0; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 500;
-          cursor: pointer; color: ${CREAM}; background: ${INK};
+          cursor: pointer; color: ${P.btnText}; background: ${P.btnBg};
         }
-        button.ghost { background: transparent; color: #6E6D66; padding: 6px 8px; }
-        button.stop { background: ${DANGER}; color: ${CREAM}; }
-        a { color: ${LINK}; text-decoration: none; font-weight: 500; }
-        .muted { color: #9B9A93; }
+        button.ghost { background: transparent; color: ${P.secondary}; padding: 6px 8px; }
+        button.stop { background: ${P.danger}; color: ${P.onDanger}; }
+        a { color: ${P.link}; text-decoration: none; font-weight: 500; }
+        .muted { color: ${P.muted}; }
       </style>
       <div class="card" part="card">
-        <svg class="logo" viewBox="0 0 24 24" fill="${ACCENT}" aria-hidden="true">
+        <svg class="logo" viewBox="0 0 24 24" fill="${P.accent}" aria-hidden="true">
           <rect x="3" y="9" width="2.5" height="6" rx="1.25"/>
           <rect x="7.5" y="6" width="2.5" height="12" rx="1.25"/>
           <rect x="12" y="3" width="2.5" height="18" rx="1.25"/>
@@ -223,6 +235,38 @@
     const now = detectInCall();
     if (now !== inCall) { inCall = now; render(); }
   }
+
+  // --- Theme --------------------------------------------------------------
+  // Mirror the extension's Theme setting for the pill + docked panel. "system"
+  // follows the OS live; the choice is read from storage and watched for edits.
+  const themeMQ = window.matchMedia("(prefers-color-scheme: dark)");
+  let themeMode = "system";
+  function resolveTheme() {
+    if (themeMode === "light" || themeMode === "dark") return themeMode;
+    return themeMQ.matches ? "dark" : "light";
+  }
+  function repaintTheme() {
+    const next = PALETTES[resolveTheme()];
+    if (next === P) return;
+    P = next;
+    if (panelHost) {
+      panelHost.style.background = P.panelBg;
+      panelHost.style.borderLeft = `1px solid ${P.panelBorder}`;
+    }
+    if (host) { unmount(); render(); } // rebuild the pill with the new palette
+  }
+  P = PALETTES[resolveTheme()]; // synchronous best guess before the first paint
+  themeMQ.addEventListener("change", repaintTheme);
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.wn_settings) {
+      themeMode = changes.wn_settings.newValue?.theme || "system";
+      repaintTheme();
+    }
+  });
+  chrome.storage.local
+    .get("wn_settings")
+    .then(({ wn_settings }) => { themeMode = wn_settings?.theme || "system"; repaintTheme(); })
+    .catch(() => {});
 
   setInterval(poll, 1500);
   poll();

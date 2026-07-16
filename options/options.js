@@ -1,11 +1,14 @@
 import * as store from "../lib/store.js";
 import { requestMicPermission } from "../lib/capture.js";
+import { applyTheme } from "../lib/theme.js";
 
 const $ = (id) => document.getElementById(id);
-const fields = ["panelMode", "notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
+const fields = ["theme", "panelMode", "notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
 
 async function load() {
   const s = await store.getSettings();
+  applyTheme(s.theme);
+  $("theme").value = s.theme;
   $("panelMode").value = s.panelMode === "docked" ? "docked" : "native";
   $("notionDatabaseID").value = s.notionDatabaseID;
   $("autoExportToNotion").checked = s.autoExportToNotion;
@@ -18,6 +21,7 @@ async function load() {
 
 async function save() {
   const patch = {
+    theme: $("theme").value,
     panelMode: $("panelMode").value === "docked" ? "docked" : "native",
     notionDatabaseID: $("notionDatabaseID").value.trim(),
     autoExportToNotion: $("autoExportToNotion").checked,
@@ -26,6 +30,7 @@ async function save() {
     deepgramModel: $("deepgramModel").value.trim() || "nova-3",
     geminiModel: $("geminiModel").value.trim() || "gemini-2.5-flash",
   };
+  applyTheme(patch.theme); // reflect the choice on this page immediately
   await store.setSettings(patch);
   chrome.runtime.sendMessage({ type: "WN_SETTINGS_CHANGED" }).catch(() => {});
   flashSaved();

@@ -1,53 +1,8 @@
-/* Winday Data design system — light theme.
-   Tokens (colors, radii, type) mirror the Figma "Winday Data — Design System".
-   Font: Instrument Sans (bundled). Primary near-black, never blue; blue (brand)
-   is reserved for links and active states. Cards: surface + hairline border,
-   never a shadow. Tags: subtle fill + on-subtle text, radius/full, no border. */
-@font-face {
-  font-family: "Instrument Sans";
-  src: url("../fonts/instrument-sans.woff2") format("woff2");
-  font-weight: 300 700;
-  font-style: normal;
-  font-display: swap;
-}
-/* Charis SIL (serif) — used for the sign-in title. Latin subset, OFL. */
-@font-face {
-  font-family: "Charis SIL";
-  src: url("../fonts/charis-sil.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-:root {
-  --bg-page: #faf9f5;
-  --bg-surface: #faf9f5;
-  --bg-surface-raised: #f5f4ef;
-  --bg-surface-hover: #f0eee9;
-  --bg-inset: #e8e6e0;
-  --bg-inverse: #1f1e1d;
-  --bg-inverse-hover: #30302e;
-  --text-primary: #1f1e1d;
-  --text-secondary: #6e6d66;
-  --text-muted: #9b9a93;
-  --text-inverse: #faf9f5;
-  --text-brand: #2e5f9c;
-  --border-subtle: #e8e6e0;
-  --border-default: #d6d3cb;
-  --border-strong: #b8b7b0;
-  --border-focus: #3670b2;
-  --brand-solid: #3670b2;
-  --brand-hover: #2e5f9c;
-  --success: #4e7358; --success-subtle: #e7eee8; --success-on-subtle: #2d4333;
-  --warning: #b5893c; --warning-subtle: #f7efe0; --warning-on-subtle: #6e5122;
-  --danger: #b4553f; --danger-subtle: #f8eae6; --danger-on-subtle: #6d3227;
-  --info: #3670b2; --info-subtle: #e9f0f8; --info-on-subtle: #2e5f9c;
-  --neutral: #9b9a93; --neutral-subtle: #f0eee9; --neutral-on-subtle: #55534d;
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-full: 999px;
-  --font: "Instrument Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-
+/* Winday Meet side panel — layout + components. Design tokens (colours, radii,
+   fonts) and the light/dark palettes live in the shared ../theme.css, linked
+   before this file. Primary near-black, never blue; blue (brand) is reserved
+   for links and active states. Cards: surface + hairline border, never a
+   shadow. Tags: subtle fill + on-subtle text, radius/full, no border. */
 * { box-sizing: border-box; }
 html, body { height: 100%; width: 100%; }
 body {

@@ -13,8 +13,17 @@
 import * as sb from "../lib/supabase.js";
 import * as store from "../lib/store.js";
 import { createRecorder, acquireMic, requestMicPermission } from "../lib/capture.js";
+import { applyTheme } from "../lib/theme.js";
 
 const $ = (id) => document.getElementById(id);
+
+// Apply the saved Theme choice as early as possible, then keep it in sync
+// whenever settings change (the service worker broadcasts WN_STATE on save).
+async function syncTheme() {
+  const s = await store.getSettings();
+  applyTheme(s.theme);
+}
+syncTheme();
 let state = { phase: "idle" };
 let meetings = [];
 let session = null;
@@ -50,6 +59,7 @@ chrome.runtime.onMessage.addListener((msg) => {
       session = sess;
       render();
     });
+    syncTheme(); // a settings change (e.g. Theme) also arrives as WN_STATE
   }
   // Stop/cancel routed by the service worker when THIS panel hosts the
   // fallback recording.

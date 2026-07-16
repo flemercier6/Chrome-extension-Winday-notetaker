@@ -17,7 +17,7 @@ const OFFSCREEN_PATH = "offscreen.html";
 // The Winday CRM web app (same Supabase project as the extension) — used for
 // web sign-in. winday-auth.js runs there and bridges the session back.
 const WINDAY_WEB_URL = "https://crm.winday.app/";
-let authWindowId = null; // the sign-in popup window, while open
+let authTabId = null; // the sign-in tab, while open
 
 // --- Recorder state (mirrored to storage so the UI survives SW restarts) --
 
@@ -110,22 +110,18 @@ async function handle(msg, sender) {
 
     // --- Web sign-in (Winday CRM, same Supabase project) ---
     case "WN_SIGN_IN_WEB": {
-      // Open the CRM in a popup window. Its content script (winday-auth.js)
-      // reads the Supabase session from localStorage — instantly if the user
-      // is already logged in there, otherwise once they finish — and posts it
-      // back via WN_WEB_SESSION.
+      // Open the CRM in a new tab in the current window. Its content script
+      // (winday-auth.js) reads the Supabase session from localStorage —
+      // instantly if the user is already logged in there, otherwise once they
+      // finish — and posts it back via WN_WEB_SESSION.
       try {
-        if (authWindowId != null) {
-          await chrome.windows.update(authWindowId, { focused: true }).catch(() => {});
+        if (authTabId != null) {
+          // A sign-in tab is already open — just bring it to the front.
+          await chrome.tabs.update(authTabId, { active: true }).catch(() => {});
           return { ok: true };
         }
-        const win = await chrome.windows.create({
-          url: WINDAY_WEB_URL,
-          type: "popup",
-          width: 480,
-          height: 760,
-        });
-        authWindowId = win.id;
+        const tab = await chrome.tabs.create({ url: WINDAY_WEB_URL, active: true });
+        authTabId = tab.id;
         return { ok: true };
       } catch (e) {
         return { ok: false, error: String(e?.message || e) };
@@ -137,10 +133,10 @@ async function handle(msg, sender) {
       if (!s || !s.accessToken || !s.refreshToken) return { ok: false, error: "Invalid session." };
       await store.setSession(s);
       broadcast();
-      // Close the sign-in popup we opened (best-effort).
-      if (authWindowId != null) {
-        chrome.windows.remove(authWindowId).catch(() => {});
-        authWindowId = null;
+      // Close the sign-in tab we opened (best-effort).
+      if (authTabId != null) {
+        chrome.tabs.remove(authTabId).catch(() => {});
+        authTabId = null;
       }
       return { ok: true };
     }
@@ -419,9 +415,9 @@ async function recordFromMenu(tab) {
 // Expose stage labels to any page that wants them via a getter message.
 export { STAGE_LABELS };
 
-// If the user closes the sign-in popup themselves, forget it.
-chrome.windows.onRemoved.addListener((winId) => {
-  if (winId === authWindowId) authWindowId = null;
+// If the user closes the sign-in tab themselves, forget it.
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === authTabId) authTabId = null;
 });
 
 function boot() {

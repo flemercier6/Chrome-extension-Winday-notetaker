@@ -1,0 +1,114 @@
+/* Winday Data design system — shared tokens for every extension surface
+   (side panel + options page). Light by default. The user's Theme choice is
+   written to data-theme on <html> by lib/theme.js:
+     - "light"  -> forced light
+     - "dark"   -> forced dark
+     - "system" (or no attribute) -> follows the OS, live, via the media query.
+   Only colour tokens change between themes; radii and font stay the same. */
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("fonts/instrument-sans.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+/* Charis SIL (serif) — used for the sign-in title. Latin subset, OFL. */
+@font-face {
+  font-family: "Charis SIL";
+  src: url("fonts/charis-sil.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --bg-page: #faf9f5;
+  --bg-surface: #faf9f5;
+  --bg-surface-raised: #f5f4ef;
+  --bg-surface-hover: #f0eee9;
+  --bg-inset: #e8e6e0;
+  --bg-inverse: #1f1e1d;
+  --bg-inverse-hover: #30302e;
+  --text-primary: #1f1e1d;
+  --text-secondary: #6e6d66;
+  --text-muted: #9b9a93;
+  --text-inverse: #faf9f5;
+  --text-brand: #2e5f9c;
+  --border-subtle: #e8e6e0;
+  --border-default: #d6d3cb;
+  --border-strong: #b8b7b0;
+  --border-focus: #3670b2;
+  --brand-solid: #3670b2;
+  --brand-hover: #2e5f9c;
+  --success: #4e7358; --success-subtle: #e7eee8; --success-on-subtle: #2d4333;
+  --warning: #b5893c; --warning-subtle: #f7efe0; --warning-on-subtle: #6e5122;
+  --danger: #b4553f; --danger-subtle: #f8eae6; --danger-on-subtle: #6d3227;
+  --info: #3670b2; --info-subtle: #e9f0f8; --info-on-subtle: #2e5f9c;
+  --neutral: #9b9a93; --neutral-subtle: #f0eee9; --neutral-on-subtle: #55534d;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-full: 999px;
+  --font: "Instrument Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Dark palette — a warm charcoal mirroring the cream. Primary (inverse)
+   surfaces flip to light-on-dark and the brand blue is brightened so it reads
+   on the dark ground. Declared once as a custom-property set... */
+@media (prefers-color-scheme: dark) {
+  /* System-dark (and the pre-script default): apply unless forced light. */
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg-page: #1b1a18;
+    --bg-surface: #1b1a18;
+    --bg-surface-raised: #232220;
+    --bg-surface-hover: #2a2825;
+    --bg-inset: #333029;
+    --bg-inverse: #f5f4ef;
+    --bg-inverse-hover: #e4e2dc;
+    --text-primary: #f2f1ec;
+    --text-secondary: #b4b2aa;
+    --text-muted: #86847c;
+    --text-inverse: #1f1e1d;
+    --text-brand: #82b3e8;
+    --border-subtle: #2b2926;
+    --border-default: #3a3835;
+    --border-strong: #4c4a46;
+    --border-focus: #5b9bd8;
+    --brand-solid: #5b9bd8;
+    --brand-hover: #82b3e8;
+    --success: #7aa588; --success-subtle: #212f28; --success-on-subtle: #a9cdb5;
+    --warning: #d0a75e; --warning-subtle: #33291a; --warning-on-subtle: #e8c88f;
+    --danger: #d98466; --danger-subtle: #351f18; --danger-on-subtle: #f0b3a1;
+    --info: #5b9bd8; --info-subtle: #1b2733; --info-on-subtle: #a9cbe8;
+    --neutral: #86847c; --neutral-subtle: #2a2825; --neutral-on-subtle: #b4b2aa;
+  }
+}
+
+/* Forced dark: applies regardless of the OS setting. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-page: #1b1a18;
+  --bg-surface: #1b1a18;
+  --bg-surface-raised: #232220;
+  --bg-surface-hover: #2a2825;
+  --bg-inset: #333029;
+  --bg-inverse: #f5f4ef;
+  --bg-inverse-hover: #e4e2dc;
+  --text-primary: #f2f1ec;
+  --text-secondary: #b4b2aa;
+  --text-muted: #86847c;
+  --text-inverse: #1f1e1d;
+  --text-brand: #82b3e8;
+  --border-subtle: #2b2926;
+  --border-default: #3a3835;
+  --border-strong: #4c4a46;
+  --border-focus: #5b9bd8;
+  --brand-solid: #5b9bd8;
+  --brand-hover: #82b3e8;
+  --success: #7aa588; --success-subtle: #212f28; --success-on-subtle: #a9cdb5;
+  --warning: #d0a75e; --warning-subtle: #33291a; --warning-on-subtle: #e8c88f;
+  --danger: #d98466; --danger-subtle: #351f18; --danger-on-subtle: #f0b3a1;
+  --info: #5b9bd8; --info-subtle: #1b2733; --info-on-subtle: #a9cbe8;
+  --neutral: #86847c; --neutral-subtle: #2a2825; --neutral-on-subtle: #b4b2aa;
+}

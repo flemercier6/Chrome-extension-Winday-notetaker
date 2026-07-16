@@ -1,32 +1,5 @@
-/* Winday Data design system — light theme (shared tokens with the panel). */
-@font-face {
-  font-family: "Instrument Sans";
-  src: url("../fonts/instrument-sans.woff2") format("woff2");
-  font-weight: 300 700;
-  font-style: normal;
-  font-display: swap;
-}
-:root {
-  --bg-page: #faf9f5;
-  --bg-surface: #faf9f5;
-  --bg-surface-hover: #f0eee9;
-  --bg-inset: #e8e6e0;
-  --bg-inverse: #1f1e1d;
-  --bg-inverse-hover: #30302e;
-  --text-primary: #1f1e1d;
-  --text-secondary: #6e6d66;
-  --text-muted: #9b9a93;
-  --text-inverse: #faf9f5;
-  --text-brand: #2e5f9c;
-  --border-subtle: #e8e6e0;
-  --border-default: #d6d3cb;
-  --border-focus: #3670b2;
-  --brand-solid: #3670b2;
-  --danger: #b4553f;
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --font: "Instrument Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
-}
+/* Winday Meet options page — layout only. Design tokens and the light/dark
+   palettes live in the shared ../theme.css, linked before this file. */
 * { box-sizing: border-box; }
 body {
   margin: 0; background: var(--bg-page); color: var(--text-primary);
@@ -56,7 +29,7 @@ input[type="text"]:focus, textarea:focus, select:focus {
   box-shadow: 0 0 0 3px rgba(54, 112, 178, 0.15);
 }
 input[type="text"]::placeholder, textarea::placeholder { color: var(--text-muted); }
-input[type="checkbox"] { width: auto; accent-color: var(--bg-inverse); }
+input[type="checkbox"] { width: auto; accent-color: var(--brand-solid); }
 textarea { resize: vertical; }
 .row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 button {
