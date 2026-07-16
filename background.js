@@ -73,20 +73,6 @@ function sendToOffscreen(message) {
 // --- Message handling ----------------------------------------------------
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  // sidePanel.open() consumes the user-gesture token, which does NOT survive
-  // an `await` — so the pill's open request is handled synchronously here,
-  // before the async dispatcher.
-  if (msg?.type === "WN_OPEN_SIDEPANEL") {
-    if (!sender?.tab) {
-      sendResponse({ ok: false, error: "No tab." });
-      return false;
-    }
-    chrome.sidePanel
-      .open({ tabId: sender.tab.id })
-      .then(() => sendResponse({ ok: true }))
-      .catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
-    return true;
-  }
   handle(msg, sender).then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
   return true; // async response
 });
@@ -103,36 +89,19 @@ async function handle(msg, sender) {
       return { ok: true, state, session, meetings, settings, micGranted };
     }
 
-    case "WN_START": {
-      // msg: { streamId, tabId, title, calendar? }
-      if (state.phase === "recording") return { ok: false, error: "Already recording." };
-      const session = await store.getSession();
-      if (!session) return { ok: false, error: "Sign in first." };
-      const settings = await store.getSettings();
-      const meeting = {
-        id: crypto.randomUUID(),
-        title: msg.title || `Meeting ${new Date().toLocaleString()}`,
-        startedAt: new Date().toISOString(),
-        calendar: msg.calendar || null,
-      };
-      await ensureOffscreen();
-      await setState({
-        phase: "recording",
-        meetingId: meeting.id,
-        title: meeting.title,
-        startedAt: meeting.startedAt,
-        stage: null,
-        notionURL: null,
-        error: null,
-      });
-      await sendToOffscreen({
-        type: "START",
-        streamId: msg.streamId,
-        meeting,
-        session,
-        settings,
-      });
-      return { ok: true, meetingId: meeting.id };
+    case "WN_RECORD_TAB": {
+      // msg: { tabId, title, calendar? } — the stream id is minted HERE in the
+      // service worker: what authorizes it is the activeTab grant on the target
+      // tab (from an icon click, the context menu or the keyboard shortcut),
+      // not which extension context asks. This also works when the panel runs
+      // as an iframe inside the Meet page (Arc-compatible layout).
+      let streamId;
+      try {
+        streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: msg.tabId });
+      } catch (e) {
+        return { ok: false, error: String(e?.message || e) };
+      }
+      return beginRecording({ streamId, title: msg.title, calendar: msg.calendar });
     }
 
     case "WN_STOP":
@@ -221,21 +190,128 @@ async function handle(msg, sender) {
       broadcast();
       return { ok: true };
 
+    // The panel iframe asks its host page (via us) to close it.
+    case "WN_CLOSE_PANEL":
+      if (sender?.tab?.id != null) {
+        chrome.tabs.sendMessage(sender.tab.id, { type: "WN_TOGGLE_PANEL", ensure: "close" }).catch(() => {});
+      }
+      return { ok: true };
+
     default:
       return { ok: false, error: `Unknown message: ${msg.type}` };
   }
 }
 
+/** Starts a recording from an already-minted tab-capture stream id. */
+async function beginRecording({ streamId, title, calendar }) {
+  if (state.phase === "recording") return { ok: false, error: "Already recording." };
+  const session = await store.getSession();
+  if (!session) return { ok: false, error: "Sign in first." };
+  const settings = await store.getSettings();
+  const meeting = {
+    id: crypto.randomUUID(),
+    title: title || `Meeting ${new Date().toLocaleString()}`,
+    startedAt: new Date().toISOString(),
+    calendar: calendar || null,
+  };
+  await ensureOffscreen();
+  await setState({
+    phase: "recording",
+    meetingId: meeting.id,
+    title: meeting.title,
+    startedAt: meeting.startedAt,
+    stage: null,
+    notionURL: null,
+    error: null,
+  });
+  await sendToOffscreen({ type: "START", streamId, meeting, session, settings });
+  return { ok: true, meetingId: meeting.id };
+}
+
+// --- Toolbar icon, context menu, shortcut -------------------------------
+// Arc does not render Chrome's native side panel, so the panel is an iframe
+// the content script docks INSIDE the Meet page (it pushes the page content
+// with a margin — no overlay). The icon / context menu / shortcut are also
+// what grant activeTab on the call's tab, which authorizes tabCapture there.
+
+const MEET_URL = /^https:\/\/meet\.google\.com\//;
+
+function isMeetTab(tab) {
+  return !!tab?.id && MEET_URL.test(tab.url || "");
+}
+
+/** Opens the docked panel in a Meet tab, injecting the content script if the
+ *  copy in the page went stale (e.g. after an extension reload). */
+async function openPanelInTab(tab) {
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: "WN_TOGGLE_PANEL", ensure: "open" });
+  } catch (_) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content/content.js"] });
+      await chrome.tabs.sendMessage(tab.id, { type: "WN_TOGGLE_PANEL", ensure: "open" });
+    } catch (_) {
+      /* tab not reachable */
+    }
+  }
+}
+
+function titleFromTab(tab) {
+  let t = (tab?.title || "").replace(/\s*[-–]\s*Google Meet\s*$/i, "").replace(/^Meet\s*[-–]\s*/i, "").trim();
+  if (!t || /^meet\.google\.com/i.test(t)) t = `Meeting ${new Date().toLocaleString()}`;
+  return t;
+}
+
+chrome.action.onClicked.addListener(async (tab) => {
+  if (isMeetTab(tab)) {
+    await openPanelInTab(tab);
+  } else {
+    // Not on a call: open the dashboard (same page, as a full tab).
+    chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel/sidepanel.html") });
+  }
+});
+
+function ensureMenus() {
+  if (!chrome.contextMenus) return;
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: "wn-record",
+      title: "Winday Notetaker — Enregistrer ce call",
+      contexts: ["page"],
+      documentUrlPatterns: ["https://meet.google.com/*"],
+    });
+    chrome.contextMenus.create({
+      id: "wn-panel",
+      title: "Winday Notetaker — Ouvrir le panneau",
+      contexts: ["page"],
+      documentUrlPatterns: ["https://meet.google.com/*"],
+    });
+  });
+}
+
+chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
+  if (!isMeetTab(tab)) return;
+  if (info.menuItemId === "wn-panel") {
+    await openPanelInTab(tab);
+    return;
+  }
+  if (info.menuItemId === "wn-record") {
+    await openPanelInTab(tab);
+    if (state.phase === "recording") return;
+    try {
+      const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+      await beginRecording({ streamId, title: titleFromTab(tab) });
+    } catch (e) {
+      await setState({ phase: "failed", stage: null, error: String(e?.message || e) });
+    }
+  }
+});
+
 // Expose stage labels to any page that wants them via a getter message.
 export { STAGE_LABELS };
 
-// Clicking the toolbar icon opens the SIDE PANEL (Chrome's native right-hand
-// panel, which PUSHES the page content instead of overlaying it). That same
-// click also counts as "invoking" the extension on the active tab — which is
-// exactly what authorizes chrome.tabCapture for that tab.
 function boot() {
   loadState();
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+  ensureMenus();
 }
 chrome.runtime.onInstalled.addListener(boot);
 chrome.runtime.onStartup.addListener(boot);

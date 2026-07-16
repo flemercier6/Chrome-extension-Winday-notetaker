@@ -1,9 +1,11 @@
-// The side-panel UI (Chrome's native right-hand panel — it pushes the page
-// content, no overlay). Same responsibilities as the former toolbar popup:
-// sign-in, the record trigger (the panel is an extension page, so a click here
-// after the toolbar-icon invocation can mint the tab-capture stream id), live
-// recording/processing status, and the recordings list. Stays open for the
-// whole call, so the timer and pipeline progress remain visible.
+// The panel UI. Two hosting modes, same file:
+//   1. Docked in the Meet page — the content script embeds this page as an
+//      iframe fixed to the right edge and pushes the page content aside with a
+//      margin (works in Arc, which doesn't render Chrome's native side panel).
+//   2. Full-tab dashboard — opened by the toolbar icon on non-Meet tabs.
+// Responsibilities: sign-in, the record trigger (start is delegated to the
+// service worker, which mints the tab-capture stream id), live recording and
+// pipeline status, and the recordings list.
 import * as sb from "../lib/supabase.js";
 import * as store from "../lib/store.js";
 
@@ -140,21 +142,32 @@ function itemRow(m) {
 
 // --- Actions -------------------------------------------------------------
 
+/** The tab to record: when the panel is embedded in the Meet page, that page's
+ *  own tab; when open as a full-tab dashboard, the window's active tab. */
+async function targetTab() {
+  const cur = await chrome.tabs.getCurrent().catch(() => null);
+  if (cur && /^https:\/\/meet\.google\.com\//.test(cur.url || "")) return cur;
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return active || null;
+}
+
 async function startRecording() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await targetTab();
   if (!tab || !/^https?:/.test(tab.url || "")) {
     return recorderHint("Ouvrez l'onglet de votre réunion (Google Meet), puis réessayez.");
   }
-  let streamId;
-  try {
-    streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-  } catch (e) {
-    return recorderHint(
-      "Impossible de capturer cet onglet (" + (e?.message || e) + "). " +
-      "Cliquez une fois sur l'icône Winday de la barre d'outils avec l'onglet du call actif, puis réessayez.",
+  // The stream id is minted by the service worker — what authorizes it is the
+  // activeTab grant on the call's tab (icon click / context menu / shortcut).
+  const r = await chrome.runtime
+    .sendMessage({ type: "WN_RECORD_TAB", tabId: tab.id, title: deriveTitle(tab) })
+    .catch((e) => ({ ok: false, error: String(e?.message || e) }));
+  if (!r || r.ok === false) {
+    recorderHint(
+      "Impossible de capturer (" + (r?.error || "erreur inconnue") + "). " +
+      "Faites un clic droit sur la page du call → « Winday Notetaker — Enregistrer ce call », " +
+      "ou cliquez une fois sur l'icône de l'extension, puis réessayez.",
     );
   }
-  await chrome.runtime.sendMessage({ type: "WN_START", streamId, tabId: tab.id, title: deriveTitle(tab) });
 }
 
 function recorderHint(msg) {
@@ -242,5 +255,12 @@ $("password").addEventListener("keydown", (e) => { if (e.key === "Enter") doSign
 $("btn-signout").addEventListener("click", async () => { sb.signOut(); await store.setSession(null); session = null; render(); });
 $("btn-settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
 $("mic-link").addEventListener("click", (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
+
+// Embedded in the Meet page (iframe): show ✕, which asks the host page —
+// via the service worker — to undock the panel.
+if (window.parent !== window) {
+  $("btn-close").classList.remove("hidden");
+  $("btn-close").addEventListener("click", () => chrome.runtime.sendMessage({ type: "WN_CLOSE_PANEL" }).catch(() => {}));
+}
 
 refresh();

@@ -26,8 +26,8 @@ one shows up in the same place.
         ▲                             │   • summarize              │ ─▶ summarize
         │ tab MediaStream id          │   • enrich-meeting         │  Notion API
    ┌────┴───────┐   ┌──────────┐      │   • export-notion          │ ─▶ create page
-   │ side panel │   │ content  │      │ Postgres: meetings (RLS)   │
-   │  (start)   │   │  pill    │      └────────────────────────────┘
+   │   docked   │   │ content  │      │ Postgres: meetings (RLS)   │
+   │ panel (UI) │   │  pill    │      └────────────────────────────┘
    └────────────┘   └──────────┘
 ```
 
@@ -63,30 +63,36 @@ access is gated by Supabase Auth + RLS).
 
 ## Use
 
-1. Click the toolbar icon: the **side panel** opens on the right — it *pushes*
-   the page content aside (Chrome's native panel, no overlay) and stays open for
-   the whole call. **Sign in** there with your Winday account (same credentials
-   as the macOS app / CRM).
+Works in **Chrome** and in **Arc** (Arc doesn't render Chrome's native side
+panel, so the panel is docked *inside* the Meet page instead — same look, and it
+still pushes the page content aside rather than overlaying it).
+
+1. Join a **Google Meet** call. A small pill appears at the top of the tab —
+   its **Ouvrir le panneau** button docks the panel on the right (the call page
+   is pushed aside, no overlay). The toolbar icon and `⌘⇧9` do the same.
+   **Sign in** in the panel with your Winday account (same credentials as the
+   macOS app / CRM).
 2. Open **Settings** (⚙) once and click **Autoriser le microphone** so your side
    of the call is captured. Set your **Notion database ID** there too.
-3. Join a **Google Meet** call. A small pill appears at the top of the tab (its
-   *Enregistrer* button also opens the side panel).
-4. In the panel → **Enregistrer cet appel**. Recording starts; the elapsed time
-   stays visible in the panel, and you can stop from the panel or the pill.
-5. When the call ends and you stop, the extension uploads, transcribes,
-   summarizes and (if enabled) exports to Notion. Progress and the result stay
-   visible in the panel, and the meeting appears in the Winday CRM.
+3. Start recording — two ways:
+   - **Right‑click the call page → “Winday Notetaker — Enregistrer ce call”**
+     (recommended in Arc: it both authorizes the capture and starts it), or
+   - **Enregistrer cet appel** in the panel — works after the extension was
+     *invoked* once on that tab (toolbar icon click, context menu, or `⌘⇧9`).
+4. The elapsed time stays visible in the panel and the pill; stop from either.
+5. When you stop, the extension uploads, transcribes, summarizes and (if
+   enabled) exports to Notion. Progress and the result stay visible in the
+   panel, and the meeting appears in the Winday CRM.
 
 ### Notes & limitations (v1)
 
-- **Requires Chrome 116+** (the side‑panel APIs).
-- **Capture authorization**: Chrome only allows tab capture on a tab where the
-  extension was *invoked* — clicking the **toolbar icon** does that (and opens
-  the panel at the same time). If the panel was opened from the pill instead and
-  Chrome refuses to capture, click the toolbar icon once with the call tab
-  active, then retry.
-- The panel's side (left/right) follows Chrome's setting in
-  `chrome://settings/appearance` → *Side panel position* (right by default).
+- **Capture authorization**: Chromium only allows tab capture on a tab where the
+  extension was *invoked* — a toolbar‑icon click, the right‑click menu item, or
+  the keyboard shortcut. The context‑menu path starts recording in the same
+  action, so it never hits this; the panel's record button needs one prior
+  invocation on the tab and otherwise shows a hint.
+- On non‑Meet tabs, the toolbar icon opens the same UI as a full‑tab
+  **dashboard** (recordings list, retry, export).
 - **Microphone permission** must be granted from the **Settings** page (a full
   tab) — extension pages are where Chrome shows the mic prompt. Without it, the
   call is still recorded (participants only); your voice just won't be on the
@@ -116,8 +122,8 @@ manifest.json          MV3 manifest
 config.js              publishable Supabase URL + anon key + model defaults
 background.js          service worker: offscreen lifecycle + message routing + state
 offscreen.html/.js     capture (tab + mic → stereo) + upload + pipeline
-content/content.js     meet.google.com detection + floating pill (shadow DOM)
-sidepanel/             Chrome side panel: sign‑in + recordings + the "record" trigger
+content/content.js     meet.google.com: pill + docks the panel iframe (pushes the page)
+sidepanel/             the panel UI: docked in the Meet page (iframe) or full‑tab dashboard
 options/               settings: mic permission, Notion db, models, prompt
 lib/supabase.js        auth / storage / Edge Function REST client
 lib/pipeline.js        upload → transcribe → summarize → export orchestration
