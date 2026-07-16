@@ -57,6 +57,7 @@ Deno.serve(async (req) => {
       multichannel: "true",
       diarize: "true",
       punctuate: "true",
+      numerals: "true",
       utterances: "true",
       smart_format: "true",
       detect_language: "true",

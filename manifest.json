@@ -63,7 +63,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/*", "sidepanel/*", "fonts/*"],
+      "resources": ["icons/*", "sidepanel/*", "fonts/*", "theme.css", "lib/pcm-worklet.js"],
       "matches": ["https://meet.google.com/*"]
     }
   ]
