@@ -25,16 +25,36 @@ async function syncTheme() {
 }
 syncTheme();
 let state = { phase: "idle" };
-let meetings = [];
+let meetings = [];        // local cache (in-flight + recent, from chrome.storage)
+let remoteMeetings = [];  // durable history from Supabase (all devices)
 let session = null;
 let micGranted = false;
 let timer = null;
+
+// Pull the durable meeting history from Supabase and merge it with the local
+// cache (local wins per id — it carries the freshest status mid-pipeline).
+async function syncRemoteMeetings() {
+  if (!session) return;
+  sb.useSession(session, (s) => chrome.runtime.sendMessage({ type: "WN_SESSION_REFRESHED", session: s }).catch(() => {}));
+  try {
+    remoteMeetings = await sb.listMeetings(50);
+    render();
+  } catch (_) { /* offline / not signed in — keep the local list */ }
+}
+
+function allMeetings() {
+  const byId = new Map();
+  for (const m of remoteMeetings) byId.set(m.id, m);
+  for (const m of meetings) byId.set(m.id, { ...byId.get(m.id), ...m }); // local overrides
+  return [...byId.values()].sort((a, b) => new Date(b.startedAt || 0) - new Date(a.startedAt || 0));
+}
 
 // Live session state (during + right after a recording).
 let liveUtterances = [];      // committed finals: { channel, speaker, text }
 let interim = {};             // in-progress text per channel: { 0:{speaker,text}, 1:{…} }
 let vizBars = null;           // latest visualizer levels (array of 0..1)
 let activeTab = "transcript"; // which session tab is shown
+let viewingId = null;         // a past meeting opened from the list (read-only)
 
 // --- Boot ----------------------------------------------------------------
 
@@ -50,6 +70,7 @@ async function refresh() {
     meetings = await store.getMeetings();
   }
   render();
+  syncRemoteMeetings(); // pull durable history (re-renders when it lands)
 }
 
 // Live transcript + visualizer events. They reach an open panel over runtime
@@ -79,16 +100,19 @@ chrome.runtime.onMessage.addListener((msg) => {
     // A fresh recording clears the previous session's transcript; finishing one
     // (transcript done) flips to the Summary tab — the requested flow.
     if (prev !== "recording" && state.phase === "recording") {
-      liveUtterances = []; interim = {}; vizBars = null; activeTab = "transcript";
+      liveUtterances = []; interim = {}; vizBars = null; activeTab = "transcript"; viewingId = null;
     }
     if (prev === "recording" && state.phase !== "recording") activeTab = "summary";
     // Re-read session + micGranted from storage (web sign-in / mic grant happen
     // in the service worker and only broadcast WN_STATE).
+    const hadSession = !!session;
     Promise.all([store.getMeetings(), store.getMicGranted(), store.getSession()]).then(([m, mic, sess]) => {
       meetings = m;
       micGranted = mic;
       session = sess;
       render();
+      // Refresh the durable list when signing in, or after a call is saved.
+      if (session && (!hadSession || state.phase === "done")) syncRemoteMeetings();
     });
     syncTheme(); // a settings change (e.g. Theme) also arrives as WN_STATE
   }
@@ -109,25 +133,52 @@ function render() {
 
   $("mic-banner").classList.toggle("hidden", micGranted);
 
+  // Viewing a past meeting from the list (read-only) takes over the session view.
+  const viewing = viewingId ? allMeetings().find((m) => m.id === viewingId) : null;
+  if (viewingId && !viewing) viewingId = null;
+
   const phase = state.phase;
-  const inSession = phase === "recording" || phase === "processing" || phase === "done" || phase === "failed";
+  const liveSession = phase === "recording" || phase === "processing" || phase === "done" || phase === "failed";
+  const inSession = liveSession || !!viewing;
+
   $("list-view").classList.toggle("hidden", inSession);
   $("session-view").classList.toggle("hidden", !inSession);
-  $("btn-back").classList.toggle("hidden", !(phase === "done" || phase === "failed"));
+  $("btn-back").classList.toggle("hidden", !(viewing || phase === "done" || phase === "failed"));
 
-  if (inSession) renderSession(); else renderList();
+  if (viewing) renderViewing(viewing);
+  else if (liveSession) renderSession();
+  else renderList();
   renderBottomBar();
 }
 
-// --- Live session (transcript + summary tabs) ----------------------------
+// --- Session view (live recording, or a viewed past meeting) --------------
 
 function renderSession() {
   const recording = state.phase === "recording";
   $("tab-btn-summary").disabled = recording; // no summary until the transcript is done
   if (recording && activeTab === "summary") activeTab = "transcript";
   setTab(activeTab);
-  if (activeTab === "transcript") renderTranscript();
-  else renderSummary();
+
+  const bubbles = liveUtterances.slice();
+  for (const ch of Object.keys(interim)) {
+    const it = interim[ch];
+    if (it && it.text) bubbles.push({ channel: Number(ch), speaker: it.speaker, text: it.text, interim: true });
+  }
+  renderBubbles(bubbles, recording ? "Listening… speech appears here as it's spoken." : "No transcript.", recording);
+
+  if (state.phase === "processing") summaryPending(span("spinner"), text(stageLabel(state.stage)));
+  else if (state.phase === "failed") summaryFailed(state.error, state.meetingId);
+  else renderSummaryFor(allMeetings().find((x) => x.id === state.meetingId) || null);
+}
+
+function renderViewing(m) {
+  $("tab-btn-summary").disabled = false;
+  if (!m.summary && activeTab === "summary") activeTab = "transcript";
+  setTab(activeTab);
+  const utts = (m.transcript && m.transcript.utterances) || [];
+  const bubbles = utts.map((u) => ({ channel: u.speaker === "You" ? 0 : 1, speaker: u.speaker, text: u.text }));
+  renderBubbles(bubbles, "No transcript for this meeting.", false);
+  renderSummaryFor(m);
 }
 
 function setTab(tab) {
@@ -138,56 +189,37 @@ function setTab(tab) {
   $("tab-summary").classList.toggle("hidden", tab !== "summary");
 }
 
-function renderTranscript() {
+function renderBubbles(bubbles, emptyText, autoscroll) {
   const box = $("transcript");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
   box.innerHTML = "";
-
-  const bubbles = liveUtterances.slice();
-  for (const ch of Object.keys(interim)) {
-    const it = interim[ch];
-    if (it && it.text) bubbles.push({ channel: Number(ch), speaker: it.speaker, text: it.text, interim: true });
-  }
   if (bubbles.length === 0) {
-    const e = div("transcript-empty");
-    e.textContent = state.phase === "recording" ? "Listening… speech appears here as it's spoken." : "No transcript.";
-    box.append(e);
-    return;
+    const e = div("transcript-empty"); e.textContent = emptyText; box.append(e); return;
   }
   for (const b of bubbles) {
     const el = div("utt " + (b.channel === 0 ? "you" : "them") + (b.interim ? " interim" : ""));
-    const who = div("who");
-    who.textContent = b.channel === 0 ? "You" : (b.speaker || "Participant");
-    const t = document.createElement("div");
-    t.textContent = b.text;
-    el.append(who, t);
-    box.append(el);
+    const who = div("who"); who.textContent = b.channel === 0 ? "You" : (b.speaker || "Participant");
+    const t = document.createElement("div"); t.textContent = b.text;
+    el.append(who, t); box.append(el);
   }
-  if (atBottom) box.scrollTop = box.scrollHeight;
+  if (autoscroll && atBottom) box.scrollTop = box.scrollHeight;
 }
 
-function renderSummary() {
-  const box = $("summary");
-  box.innerHTML = "";
-  const m = meetings.find((x) => x.id === state.meetingId) || null;
+function summaryPending(...nodes) {
+  const box = $("summary"); box.innerHTML = "";
+  const p = div("summary-pending"); p.append(...nodes); box.append(p);
+}
+function summaryFailed(err, meetingId) {
+  const box = $("summary"); box.innerHTML = "";
+  const p = div("summary-pending");
+  const e = document.createElement("div"); e.className = "error"; e.textContent = "⚠︎ " + (err || "Processing failed");
+  p.append(e);
+  if (meetingId) p.append(btn("Retry", "linkbtn", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: meetingId })));
+  box.append(p);
+}
 
-  if (state.phase === "processing") {
-    const p = div("summary-pending");
-    p.append(span("spinner"), text(stageLabel(state.stage)));
-    box.append(p);
-    return;
-  }
-  if (state.phase === "failed") {
-    const p = div("summary-pending");
-    const e = document.createElement("div");
-    e.className = "error";
-    e.textContent = "⚠︎ " + (state.error || "Processing failed");
-    p.append(e);
-    if (state.meetingId) p.append(btn("Retry", "linkbtn", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: state.meetingId })));
-    box.append(p);
-    return;
-  }
-
+function renderSummaryFor(m) {
+  const box = $("summary"); box.innerHTML = "";
   const summary = m && m.summary;
   if (!summary) { const p = div("summary-pending"); p.append(text("Summary not available.")); box.append(p); return; }
 
@@ -273,7 +305,7 @@ function linkA(label, url) {
 function renderList() {
   const list = $("list");
   list.innerHTML = "";
-  const items = meetings.filter((m) => m.status !== "recording");
+  const items = allMeetings().filter((m) => m.status !== "recording");
   if (items.length === 0) {
     const e = document.createElement("div");
     e.className = "empty";
@@ -286,6 +318,10 @@ function renderList() {
 
 function itemRow(m) {
   const row = div("item");
+  const busy = ["transcribing", "summarizing", "exporting"].includes(m.status);
+  const local = meetings.some((x) => x.id === m.id); // Retry/Export/Delete act on the local cache
+  const viewable = !busy && (m.summary || (m.transcript && m.transcript.utterances && m.transcript.utterances.length));
+
   const main = document.createElement("div");
   main.style.flex = "1";
   main.style.overflow = "hidden";
@@ -296,6 +332,11 @@ function itemRow(m) {
   sub.className = "sub";
   sub.textContent = subtitle(m);
   main.append(title, sub);
+  if (viewable) {
+    main.style.cursor = "pointer";
+    main.title = "Open notes";
+    main.addEventListener("click", () => { viewingId = m.id; activeTab = m.summary ? "summary" : "transcript"; render(); });
+  }
 
   const tag = document.createElement("span");
   const t = statusTag(m.status);
@@ -303,17 +344,18 @@ function itemRow(m) {
   tag.textContent = t.label;
 
   const actions = div("item-actions");
-  const busy = ["transcribing", "summarizing", "exporting"].includes(m.status);
   if (!busy) {
-    if (m.status === "recorded" || m.status === "failed")
+    if (local && (m.status === "recorded" || m.status === "failed"))
       actions.append(iconBtn("↻", "Transcribe & summarize", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: m.id })));
-    if (m.status === "ready" && !m.notionPageURL)
+    if (local && m.status === "ready" && !m.notionPageURL)
       actions.append(iconBtn("➤", "Send to Notion", () => chrome.runtime.sendMessage({ type: "WN_EXPORT", id: m.id })));
     if (m.notionPageURL) actions.append(iconLink("⧉", "Open in Notion", m.notionPageURL));
     actions.append(iconLink("◫", "Open in CRM", crmURL(m)));
-    const del = iconBtn("🗑", "Delete", () => chrome.runtime.sendMessage({ type: "WN_DISCARD", id: m.id }));
-    del.classList.add("del");
-    actions.append(del);
+    if (local) {
+      const del = iconBtn("🗑", "Delete", () => chrome.runtime.sendMessage({ type: "WN_DISCARD", id: m.id }));
+      del.classList.add("del");
+      actions.append(del);
+    }
   }
   row.append(main, tag, actions);
   return row;
@@ -520,8 +562,11 @@ $("mic-link").addEventListener("click", async (e) => {
   }
 });
 
-// Back to the recordings list from a finished session.
-$("btn-back").addEventListener("click", () => chrome.runtime.sendMessage({ type: "WN_DISMISS" }).catch(() => {}));
+// Back to the recordings list — from a viewed past meeting, or a finished session.
+$("btn-back").addEventListener("click", () => {
+  if (viewingId) { viewingId = null; render(); return; }
+  chrome.runtime.sendMessage({ type: "WN_DISMISS" }).catch(() => {});
+});
 
 // Tabs.
 $("tab-btn-transcript").addEventListener("click", () => { setTab("transcript"); renderTranscript(); });
