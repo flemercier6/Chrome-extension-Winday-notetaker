@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Signed-out view -->
+      <section id="signin" class="hidden">
+        <div class="brand">
+          <img src="../icons/icon48.png" width="20" height="20" alt="" />
+          <span>Winday Notetaker</span>
+        </div>
+        <p class="muted small">Connectez-vous avec votre compte Winday.</p>
+        <input id="email" type="email" placeholder="Email" autocomplete="username" />
+        <input id="password" type="password" placeholder="Mot de passe" autocomplete="current-password" />
+        <div id="auth-error" class="error small hidden"></div>
+        <div class="row">
+          <button id="btn-signin" class="primary">Se connecter</button>
+          <button id="btn-signup" class="ghost">Créer un compte</button>
+        </div>
+      </section>
+
+      <!-- Signed-in view -->
+      <section id="main" class="hidden">
+        <header>
+          <div class="brand">
+            <img src="../icons/icon48.png" width="18" height="18" alt="" />
+            <span>Winday Notetaker</span>
+          </div>
+          <div class="header-right">
+            <span id="user-email" class="muted small"></span>
+            <button id="btn-settings" class="icon" title="Réglages">⚙</button>
+          </div>
+        </header>
+
+        <div id="mic-banner" class="banner hidden">
+          🎤 Micro non activé — <a href="#" id="mic-link">l'activer</a> pour capter votre voix.
+        </div>
+
+        <div id="recorder" class="recorder"></div>
+
+        <div class="section-title">Enregistrements</div>
+        <div id="list" class="list"></div>
+
+        <footer>
+          <button id="btn-signout" class="ghost small">Se déconnecter</button>
+        </footer>
+      </section>
+    </div>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

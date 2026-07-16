@@ -1,0 +1,12 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Winday Notetaker — recorder</title>
+  </head>
+  <body>
+    <!-- Invisible worker page: hosts getUserMedia + MediaRecorder + the upload/
+         transcribe/summarize/export pipeline, which a service worker can't run. -->
+    <script type="module" src="offscreen.js"></script>
+  </body>
+</html>

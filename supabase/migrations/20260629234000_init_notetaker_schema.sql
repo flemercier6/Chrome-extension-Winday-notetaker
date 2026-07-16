@@ -1,0 +1,42 @@
+-- Winday Notetaker no longer owns its database schema.
+--
+-- The app now shares the Winday CRM's own Supabase project ("WInday App",
+-- ref gagfovgnuttmngnhqzwd) as its backend. That project already provides,
+-- managed by the CRM, everything the Notetaker needs:
+--
+--   • public.meetings          — one row per recorded call
+--   • public.meeting_contacts  — links a meeting to CRM contacts
+--   • storage bucket "recordings" (private) + per-user RLS
+--
+-- so this repo intentionally applies NO schema migration (applying one here
+-- would risk clobbering the CRM's tables/policies).
+--
+-- The `meetings` columns the Notetaker reads/writes (via the Edge Functions):
+--
+--   id             uuid   (pk)
+--   user_id        uuid   (auth.uid(); RLS: auth.uid() = user_id)
+--   meeting_title  text
+--   status         text   ('recorded' → 'summarizing' → 'ready' → 'exported')
+--   audio_path     text   ('<user_id>/<meeting_id>.wav' in the recordings bucket)
+--   started_at     timestamptz
+--   stopped_at     timestamptz
+--   duration_seconds integer
+--   transcript     text   (human-readable, "You: …" / "Participant 1: …")
+--   summary        text   (human-readable summary paragraph)
+--   last_error     text
+--   metadata       jsonb  (structured payload — see below)
+--
+-- metadata jsonb shape written by the functions:
+--   {
+--     "language": "fr" | null,
+--     "transcript": { "fullText": "…", "utterances": [{speaker,text,start,end}], "language": … },
+--     "summary":    { "headline": "…", "summary": "…", "key_points": [...], "next_steps": [...] },
+--     "notion_page_url": "https://www.notion.so/…"
+--   }
+--
+-- Non-secret per-user preferences (Deepgram/Gemini model, Notion database id)
+-- are passed to the Edge Functions per request, so there is no settings table.
+-- The third-party secrets (DEEPGRAM_API_KEY, GEMINI_API_KEY, NOTION_TOKEN) live
+-- only as Edge Function secrets on the Supabase project.
+
+-- (intentionally empty — no DDL)
