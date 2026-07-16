@@ -147,49 +147,37 @@
   }
 
   function render() {
-    if (!inCall) { unmount(); return; }
+    // The pill is a lightweight prompt only: it shows when a call is imminent
+    // (from the calendar) or you're on a call but not yet recording, and gets
+    // out of the way once recording starts — the side panel owns the in-call UI.
+    const phase = state.phase || "idle";
+    const imm = state.imminentCall || null;
+    if (phase !== "idle" || (!inCall && !imm)) { unmount(); return; }
     mount();
     const b = els.body;
     b.innerHTML = "";
     if (tick) { clearInterval(tick); tick = null; }
 
-    const phase = state.phase;
-    if (phase === "recording") {
-      const dot = document.createElement("span"); dot.className = "dot";
-      const time = document.createElement("span"); time.className = "time";
-      const started = state.startedAt ? new Date(state.startedAt).getTime() : Date.now();
-      const update = () => (time.textContent = fmt((Date.now() - started) / 1000));
-      update(); tick = setInterval(update, 1000);
-      const stop = button("Stop", "stop", () => send("WN_STOP"));
-      b.append(dot, time, stop);
-    } else if (phase === "processing") {
-      const sp = document.createElement("span"); sp.className = "spinner";
+    if (inCall) {
+      // On the call, not yet recording → start it (silent if the tab already
+      // carries the activeTab grant) and reveal the panel.
       const label = document.createElement("span");
-      label.textContent = stageLabel(state.stage);
-      b.append(sp, label);
-    } else if (phase === "done") {
-      const ok = document.createElement("span"); ok.textContent = "✅ Notes ready"; ok.style.fontWeight = "600";
-      b.append(ok);
-      if (state.notionURL) {
-        const a = document.createElement("a"); a.href = state.notionURL; a.target = "_blank"; a.textContent = "Open in Notion";
-        b.append(a);
-      }
-      b.append(button("✕", "ghost", () => send("WN_DISMISS")));
-    } else if (phase === "failed") {
-      const warn = document.createElement("span"); warn.textContent = "⚠︎ Processing failed";
-      b.append(warn);
-      if (state.meetingId) b.append(button("Retry", "", () => send("WN_RETRY", { id: state.meetingId })));
-      b.append(button("✕", "ghost", () => send("WN_DISMISS")));
-    } else {
-      // idle + in a call: open the panel (record button lives there). The
-      // service worker decides the mode: native side panel (Chrome/Dia) or,
-      // for browsers that don't render it (Arc), our docked iframe.
-      const label = document.createElement("span"); label.textContent = "Winday Meet";
-      const open = button("Open panel", "", async () => {
-        const r = await send("WN_OPEN_PANEL");
-        if (!r || r.mode === "docked" || r.ok === false) openPanel();
+      label.textContent = imm && imm.title ? imm.title : "Winday Meet";
+      const rec = button("● Record", "rec", async () => {
+        const r = await send("WN_RECORD_TAB");
+        const p = await send("WN_OPEN_PANEL");
+        if (!p || p.mode === "docked" || p.ok === false || (r && !r.ok)) openPanel();
       });
-      b.append(label, open);
+      b.append(label, rec);
+    } else if (imm) {
+      // A scheduled call is imminent but we're not in it yet → jump to it.
+      const label = document.createElement("span");
+      label.textContent = `${imm.title || "Your meeting"} · starting now`;
+      const join = button("Join", "rec", () => {
+        if (imm.meet_url) location.href = imm.meet_url;
+        else openPanel();
+      });
+      b.append(label, join);
     }
   }
 

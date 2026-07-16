@@ -11,6 +11,7 @@
 //     capture is refused, since the standard share dialog needs no grant and
 //     exists in every Chromium (Arc included).
 import * as store from "./lib/store.js";
+import * as sb from "./lib/supabase.js";
 import { STAGE_LABELS } from "./lib/pipeline.js";
 
 const OFFSCREEN_PATH = "offscreen.html";
@@ -30,6 +31,7 @@ let state = {
   notionURL: null,
   error: null,
   recorderHost: null, // "offscreen" | "panel" while recording
+  imminentCall: null, // {title, meet_url, start} from the calendar, for the pill
 };
 
 async function loadState() {
@@ -303,6 +305,13 @@ function isMeetTab(tab) {
   return !!tab?.id && MEET_URL.test(tab.url || "");
 }
 
+// An ACTIVE call (the "abc-defg-hij" code path), vs. the Meet home/lobby.
+const CALL_PATH = /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\/|$)/i;
+function isCallTab(tab) {
+  if (!isMeetTab(tab)) return false;
+  try { return CALL_PATH.test(new URL(tab.url).pathname); } catch (_) { return false; }
+}
+
 /** The tab to record: explicit id, else the panel's host tab (the panel is an
  *  iframe inside the Meet page, so sender.tab IS the call's tab), else any
  *  open Meet tab (audible first, then most recently used). */
@@ -352,21 +361,30 @@ let panelModeCache = "native";
 async function refreshPanelMode() {
   const settings = await store.getSettings();
   panelModeCache = settings.panelMode === "docked" ? "docked" : "native";
-  chrome.sidePanel
-    ?.setPanelBehavior({ openPanelOnActionClick: panelModeCache === "native" })
-    .catch(() => {});
+  // We open the panel ourselves in action.onClicked (so the same click can also
+  // grant activeTab and start recording), so the automatic open stays off.
+  chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
 }
 
-// Toolbar icon (and ⌘⇧9 via _execute_action). In native mode Chromium opens
-// the side panel itself and this listener never fires. In docked mode: on a
-// Meet tab, open the docked panel — that click is ALSO the activeTab grant
-// that unlocks silent capture. Elsewhere, open a full-tab dashboard.
-chrome.action.onClicked.addListener(async (tab) => {
-  if (isMeetTab(tab)) {
-    await openPanelInTab(tab);
-  } else {
+// Toolbar icon (and ⌘⇧9 via _execute_action). On an active Meet call this is
+// the zero-picker record path: the click grants activeTab, so we capture that
+// exact tab silently — no "which tab?" share dialog — and open the panel to
+// show the live transcript. On other Meet pages, just open the panel; elsewhere,
+// open the full-tab dashboard.
+chrome.action.onClicked.addListener((tab) => {
+  if (!isMeetTab(tab)) {
     chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel/sidepanel.html") });
+    return;
   }
+  // Open the panel synchronously — the native side panel needs this click's
+  // user-gesture token, which an await would drop.
+  if (panelModeCache === "native" && chrome.sidePanel) {
+    chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+  } else {
+    openPanelInTab(tab);
+  }
+  // In a call and idle → record it silently (the click just granted activeTab).
+  if (isCallTab(tab) && state.phase === "idle") recordFromMenu(tab);
 });
 
 function ensureMenus() {
@@ -420,10 +438,32 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === authTabId) authTabId = null;
 });
 
+// --- Calendar: surface the next imminent scheduled call to the pill --------
+// Polled ~every minute (chrome.alarms survives SW suspension). The pill shows
+// ~2 min before a scheduled Meet call so the user can join and start recording.
+async function refreshUpcoming() {
+  let imminent = null;
+  try {
+    const session = await store.getSession();
+    if (session) {
+      sb.useSession(session, (s) => store.setSession(s));
+      const r = await sb.fetchUpcomingMeetings(2); // starts within 2 min or ongoing
+      const m = (r && r.meetings && r.meetings[0]) || null;
+      if (m) imminent = { title: m.title || "Meeting", meet_url: m.meet_url || null, start: m.start || null };
+    }
+  } catch (_) { /* calendar not connected / offline — no prompt */ }
+  if (JSON.stringify(imminent) !== JSON.stringify(state.imminentCall || null)) {
+    await setState({ imminentCall: imminent });
+  }
+}
+chrome.alarms?.onAlarm.addListener((a) => { if (a.name === "wn-upcoming") refreshUpcoming(); });
+
 function boot() {
   loadState();
   ensureMenus();
   refreshPanelMode();
+  chrome.alarms?.create("wn-upcoming", { periodInMinutes: 1 });
+  refreshUpcoming();
 }
 chrome.runtime.onInstalled.addListener(boot);
 chrome.runtime.onStartup.addListener(boot);
