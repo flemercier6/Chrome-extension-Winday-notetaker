@@ -1,16 +1,19 @@
 {
   "manifest_version": 3,
   "name": "Winday Notetaker",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "minimum_chrome_version": "116",
   "description": "Records your Google Meet calls, transcribes them with Deepgram, summarizes them with Gemini, and pushes the notes to the Winday CRM + Notion.",
   "action": {
-    "default_popup": "popup/popup.html",
     "default_title": "Winday Notetaker",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
+  },
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
   },
   "icons": {
     "16": "icons/icon16.png",
@@ -26,9 +29,8 @@
     "offscreen",
     "tabCapture",
     "activeTab",
-    "scripting",
     "tabs",
-    "alarms"
+    "sidePanel"
   ],
   "host_permissions": [
     "https://gagfovgnuttmngnhqzwd.supabase.co/*"

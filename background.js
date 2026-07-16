@@ -73,6 +73,20 @@ function sendToOffscreen(message) {
 // --- Message handling ----------------------------------------------------
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // sidePanel.open() consumes the user-gesture token, which does NOT survive
+  // an `await` — so the pill's open request is handled synchronously here,
+  // before the async dispatcher.
+  if (msg?.type === "WN_OPEN_SIDEPANEL") {
+    if (!sender?.tab) {
+      sendResponse({ ok: false, error: "No tab." });
+      return false;
+    }
+    chrome.sidePanel
+      .open({ tabId: sender.tab.id })
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
+    return true;
+  }
   handle(msg, sender).then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
   return true; // async response
 });
@@ -207,17 +221,6 @@ async function handle(msg, sender) {
       broadcast();
       return { ok: true };
 
-    case "WN_OPEN_POPUP":
-      if (chrome.action.openPopup) {
-        try {
-          await chrome.action.openPopup();
-          return { ok: true };
-        } catch (_) {
-          return { ok: false, error: "Click the Winday Notetaker toolbar icon to start." };
-        }
-      }
-      return { ok: false, error: "Click the Winday Notetaker toolbar icon to start." };
-
     default:
       return { ok: false, error: `Unknown message: ${msg.type}` };
   }
@@ -226,6 +229,14 @@ async function handle(msg, sender) {
 // Expose stage labels to any page that wants them via a getter message.
 export { STAGE_LABELS };
 
-chrome.runtime.onInstalled.addListener(loadState);
-chrome.runtime.onStartup.addListener(loadState);
-loadState();
+// Clicking the toolbar icon opens the SIDE PANEL (Chrome's native right-hand
+// panel, which PUSHES the page content instead of overlaying it). That same
+// click also counts as "invoking" the extension on the active tab — which is
+// exactly what authorizes chrome.tabCapture for that tab.
+function boot() {
+  loadState();
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+}
+chrome.runtime.onInstalled.addListener(boot);
+chrome.runtime.onStartup.addListener(boot);
+boot();

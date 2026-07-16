@@ -111,10 +111,11 @@ function render() {
     if (state.meetingId) b.append(button("Réessayer", "", () => send("WN_RETRY", { id: state.meetingId })));
     b.append(button("✕", "ghost", () => send("WN_DISMISS")));
   } else {
-    // idle + in a call: offer to record (opens the popup where the gesture lives)
+    // idle + in a call: offer to record — opens the side panel (pushes the
+    // page, no overlay), where the record button lives.
     const label = document.createElement("span"); label.textContent = "Winday Notetaker";
     const rec = button("Enregistrer", "", async () => {
-      const r = await send("WN_OPEN_POPUP");
+      const r = await send("WN_OPEN_SIDEPANEL");
       if (!r || r.ok === false) {
         label.textContent = "Cliquez sur l'icône Winday ↗";
         label.className = "muted";

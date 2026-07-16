@@ -1,3 +1,9 @@
+// The side-panel UI (Chrome's native right-hand panel — it pushes the page
+// content, no overlay). Same responsibilities as the former toolbar popup:
+// sign-in, the record trigger (the panel is an extension page, so a click here
+// after the toolbar-icon invocation can mint the tab-capture stream id), live
+// recording/processing status, and the recordings list. Stays open for the
+// whole call, so the timer and pipeline progress remain visible.
 import * as sb from "../lib/supabase.js";
 import * as store from "../lib/store.js";
 
@@ -55,7 +61,8 @@ function renderRecorder() {
     const status = div("status");
     status.append(span("dot"), timeEl());
     const stop = btn("Arrêter et enregistrer", "stop", () => chrome.runtime.sendMessage({ type: "WN_STOP" }));
-    box.append(status, stop);
+    const cancel = btn("Annuler (ne pas garder)", "ghost", () => chrome.runtime.sendMessage({ type: "WN_CANCEL" }));
+    box.append(status, stop, cancel);
   } else if (phase === "processing") {
     const status = div("status");
     status.append(span("spinner"), text(stageLabel(state.stage)));
@@ -77,7 +84,7 @@ function renderRecorder() {
     box.append(rec);
     const hint = document.createElement("div");
     hint.className = "hint";
-    hint.textContent = "Ouvrez votre Google Meet dans l'onglet actif, puis lancez l'enregistrement.";
+    hint.textContent = "Ouvrez l'onglet de votre Google Meet, puis lancez l'enregistrement.";
     box.append(hint);
   }
 }
@@ -142,17 +149,20 @@ async function startRecording() {
   try {
     streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
   } catch (e) {
-    return recorderHint("Impossible de capturer cet onglet : " + (e?.message || e));
+    return recorderHint(
+      "Impossible de capturer cet onglet (" + (e?.message || e) + "). " +
+      "Cliquez une fois sur l'icône Winday de la barre d'outils avec l'onglet du call actif, puis réessayez.",
+    );
   }
   await chrome.runtime.sendMessage({ type: "WN_START", streamId, tabId: tab.id, title: deriveTitle(tab) });
 }
 
-function recorderHint(text) {
+function recorderHint(msg) {
   const box = $("recorder");
   const hint = box.querySelector(".hint") || document.createElement("div");
   hint.className = "hint";
   hint.style.color = "#c0392b";
-  hint.textContent = text;
+  hint.textContent = msg;
   if (!hint.parentNode) box.append(hint);
 }
 

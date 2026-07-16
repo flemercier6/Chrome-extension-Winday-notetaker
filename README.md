@@ -25,10 +25,10 @@ one shows up in the same place.
 └────────────────────┘                │   • transcribe             │  Gemini Flash
         ▲                             │   • summarize              │ ─▶ summarize
         │ tab MediaStream id          │   • enrich-meeting         │  Notion API
-   ┌────┴─────┐   ┌──────────┐        │   • export-notion          │ ─▶ create page
-   │  popup   │   │ content  │        │ Postgres: meetings (RLS)   │
-   │ (start)  │   │  pill    │        └────────────────────────────┘
-   └──────────┘   └──────────┘
+   ┌────┴───────┐   ┌──────────┐      │   • export-notion          │ ─▶ create page
+   │ side panel │   │ content  │      │ Postgres: meetings (RLS)   │
+   │  (start)   │   │  pill    │      └────────────────────────────┘
+   └────────────┘   └──────────┘
 ```
 
 1. **Record** — an **offscreen document** captures the Meet **tab audio**
@@ -63,22 +63,30 @@ access is gated by Supabase Auth + RLS).
 
 ## Use
 
-1. Click the toolbar icon and **sign in** with your Winday account (same
-   credentials as the macOS app / CRM).
+1. Click the toolbar icon: the **side panel** opens on the right — it *pushes*
+   the page content aside (Chrome's native panel, no overlay) and stays open for
+   the whole call. **Sign in** there with your Winday account (same credentials
+   as the macOS app / CRM).
 2. Open **Settings** (⚙) once and click **Autoriser le microphone** so your side
    of the call is captured. Set your **Notion database ID** there too.
-3. Join a **Google Meet** call. A small pill appears at the top of the tab.
-4. Click the toolbar icon → **Enregistrer cet appel**. Recording starts; you can
-   stop it from the pill or the popup.
+3. Join a **Google Meet** call. A small pill appears at the top of the tab (its
+   *Enregistrer* button also opens the side panel).
+4. In the panel → **Enregistrer cet appel**. Recording starts; the elapsed time
+   stays visible in the panel, and you can stop from the panel or the pill.
 5. When the call ends and you stop, the extension uploads, transcribes,
-   summarizes and (if enabled) exports to Notion. The result appears in the
-   popup list and in the Winday CRM.
+   summarizes and (if enabled) exports to Notion. Progress and the result stay
+   visible in the panel, and the meeting appears in the Winday CRM.
 
 ### Notes & limitations (v1)
 
-- **Starting a recording** is done from the toolbar **popup** (or the pill's
-  *Enregistrer* button, which opens it): Chrome only mints a tab‑capture stream
-  from a real user gesture with `activeTab`, which the popup provides.
+- **Requires Chrome 116+** (the side‑panel APIs).
+- **Capture authorization**: Chrome only allows tab capture on a tab where the
+  extension was *invoked* — clicking the **toolbar icon** does that (and opens
+  the panel at the same time). If the panel was opened from the pill instead and
+  Chrome refuses to capture, click the toolbar icon once with the call tab
+  active, then retry.
+- The panel's side (left/right) follows Chrome's setting in
+  `chrome://settings/appearance` → *Side panel position* (right by default).
 - **Microphone permission** must be granted from the **Settings** page (a full
   tab) — extension pages are where Chrome shows the mic prompt. Without it, the
   call is still recorded (participants only); your voice just won't be on the
@@ -109,7 +117,7 @@ config.js              publishable Supabase URL + anon key + model defaults
 background.js          service worker: offscreen lifecycle + message routing + state
 offscreen.html/.js     capture (tab + mic → stereo) + upload + pipeline
 content/content.js     meet.google.com detection + floating pill (shadow DOM)
-popup/                 sign‑in + recordings list + the "record" trigger
+sidepanel/             Chrome side panel: sign‑in + recordings + the "record" trigger
 options/               settings: mic permission, Notion db, models, prompt
 lib/supabase.js        auth / storage / Edge Function REST client
 lib/pipeline.js        upload → transcribe → summarize → export orchestration
