@@ -1,4 +1,5 @@
 import * as store from "../lib/store.js";
+import { requestMicPermission } from "../lib/capture.js";
 
 const $ = (id) => document.getElementById(id);
 const fields = ["panelMode", "notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
@@ -45,11 +46,8 @@ function updateMicStatus(granted) {
 
 async function requestMic() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach((t) => t.stop());
-    await store.setMicGranted(true);
+    await requestMicPermission(); // reports WN_MIC_GRANTED -> background persists + broadcasts
     updateMicStatus(true);
-    chrome.runtime.sendMessage({ type: "WN_SETTINGS_CHANGED" }).catch(() => {});
   } catch (e) {
     $("mic-status").textContent = "Refusé : " + (e?.message || e);
   }

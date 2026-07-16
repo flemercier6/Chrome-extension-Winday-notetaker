@@ -12,7 +12,7 @@
 // in one click, and the shared recording engine (lib/capture.js) runs here.
 import * as sb from "../lib/supabase.js";
 import * as store from "../lib/store.js";
-import { createRecorder, acquireMic } from "../lib/capture.js";
+import { createRecorder, acquireMic, requestMicPermission } from "../lib/capture.js";
 
 const $ = (id) => document.getElementById(id);
 let state = { phase: "idle" };
@@ -40,7 +40,14 @@ async function refresh() {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "WN_STATE") {
     state = msg.state || { phase: "idle" };
-    store.getMeetings().then((m) => { meetings = m; render(); });
+    // Also re-read micGranted: granting it from ANY surface (this panel,
+    // another window, the options page) broadcasts WN_STATE, and every open
+    // panel should drop its banner without needing its own round trip.
+    Promise.all([store.getMeetings(), store.getMicGranted()]).then(([m, mic]) => {
+      meetings = m;
+      micGranted = mic;
+      render();
+    });
   }
   // Stop/cancel routed by the service worker when THIS panel hosts the
   // fallback recording.
@@ -312,14 +319,52 @@ function iconBtn(label, title, onClick) { const b = document.createElement("butt
 function iconLink(label, title, url) { const a = document.createElement("button"); a.textContent = label; a.title = title; a.addEventListener("click", () => chrome.tabs.create({ url })); return a; }
 function linkBtn(label, url) { return btn(label, "record", () => chrome.tabs.create({ url })); }
 
+/** Opens Settings as a plain tab instead of chrome.runtime.openOptionsPage() —
+ *  that API can silently no-op on some Chromium forks (no error, no tab), which
+ *  is exactly what left users unable to reach it at all. A direct tab open is a
+ *  basic, universally-supported operation. Focuses an existing Options tab
+ *  rather than piling up duplicates on repeated clicks. */
+async function openSettings() {
+  const url = chrome.runtime.getURL("options/options.html");
+  try {
+    const [existing] = await chrome.tabs.query({ url });
+    if (existing) {
+      await chrome.tabs.update(existing.id, { active: true });
+      if (existing.windowId != null) await chrome.windows.update(existing.windowId, { focused: true }).catch(() => {});
+      return;
+    }
+  } catch (_) {
+    /* fall through to a plain create */
+  }
+  chrome.tabs.create({ url }).catch(() => {});
+}
+
 // --- Events --------------------------------------------------------------
 
 $("btn-signin").addEventListener("click", () => doSignIn("in"));
 $("btn-signup").addEventListener("click", () => doSignIn("up"));
 $("password").addEventListener("keydown", (e) => { if (e.key === "Enter") doSignIn("in"); });
 $("btn-signout").addEventListener("click", async () => { sb.signOut(); await store.setSession(null); session = null; render(); });
-$("btn-settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
-$("mic-link").addEventListener("click", (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
+$("btn-settings").addEventListener("click", openSettings);
+
+// Grant the mic permission INLINE — no navigation to a separate settings page.
+// That page-hop (via chrome.runtime.openOptionsPage()) is what left users
+// stuck: on some Chromium forks it silently no-ops, so "l'activer" looked
+// like it did nothing. getUserMedia's own browser prompt appears right here.
+$("mic-link").addEventListener("click", async (e) => {
+  e.preventDefault();
+  $("mic-banner-error").classList.add("hidden");
+  try {
+    await requestMicPermission();
+    micGranted = true;
+    render();
+  } catch (err) {
+    $("mic-banner-error").textContent =
+      "Micro refusé (" + (err?.message || err) + "). Vérifiez l'icône du microphone/cadenas " +
+      "dans la barre d'adresse, ou l'autorisation Microphone de ce site dans les réglages du navigateur.";
+    $("mic-banner-error").classList.remove("hidden");
+  }
+});
 
 // ✕ — embedded iframe: ask the host page (via the service worker) to hide it;
 // native side panel or dashboard tab: window.close() does the right thing.

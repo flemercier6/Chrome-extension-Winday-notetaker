@@ -75,8 +75,10 @@ Works in **Chrome**, **Dia** and **Arc**. The panel has two display modes
    its **Ouvrir le panneau** button opens the docked panel. The toolbar icon
    and `⌘⇧9` do the same. **Sign in** in the panel with your Winday account
    (same credentials as the macOS app / CRM).
-2. Open **Settings** (⚙) once and click **Autoriser le microphone** so your side
-   of the call is captured. Set your **Notion database ID** there too.
+2. If a **🎤 Micro non activé** banner shows in the panel, click **l'activer** —
+   the browser's permission prompt appears right there (no page to navigate to)
+   so your side of the call gets captured. Open **Settings** (⚙) to set your
+   **Notion database ID** and other preferences.
 3. Start recording — two ways:
    - **Enregistrer cet appel** in the panel. If Chromium refuses silent capture
      (no prior icon/menu/shortcut gesture on that tab), the standard **share
@@ -101,10 +103,15 @@ Works in **Chrome**, **Dia** and **Arc**. The panel has two display modes
   iframe (recording continues), but closing the call's tab before "Notes
   prêtes" aborts an in‑flight fallback recording/pipeline. The silent path
   (offscreen document) survives tab closes.
-- **Microphone permission** must be granted from the **Settings** page (a full
-  tab) — extension pages are where Chrome shows the mic prompt. Without it, the
-  call is still recorded (participants only); your voice just won't be on the
-  "You" channel.
+- **Microphone permission**: granted inline from the panel's banner (no
+  navigation needed — `chrome.runtime.openOptionsPage()` used to be the only
+  path and can silently no‑op on some Chromium forks, which left users stuck).
+  Without it, the call is still recorded (participants only); your voice just
+  won't be on the "You" channel. Settings' own "Autoriser le microphone" button
+  still works too, for the case where you're already there.
+- **Opening Settings** always opens a plain tab (focusing one already open
+  instead of duplicating) rather than relying on
+  `chrome.runtime.openOptionsPage()`, for the same reason.
 - **You still hear the call** while recording: captured tab audio is routed back
   to your speakers.
 - **Calendar arming** (auto‑pre‑filling the company/contacts from Google
