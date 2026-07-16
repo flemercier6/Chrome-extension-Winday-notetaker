@@ -16,7 +16,13 @@
   const api = {};
   window.__windayNotetaker = api;
 
-  const ACCENT = "#0077FF";
+  // Winday Data design-system tokens (brand blue is reserved for the mark,
+  // links and active states — primary actions are near-black).
+  const ACCENT = "#3670B2"; // brand/solid
+  const LINK = "#2E5F9C"; // text/brand
+  const INK = "#1F1E1D"; // text/primary + bg/inverse
+  const CREAM = "#FAF9F5"; // bg/surface + text/inverse
+  const DANGER = "#B4553F"; // status/danger
   const PANEL_WIDTH = 380;
 
   let host, root, els; // pill
@@ -41,8 +47,8 @@
       `width:${PANEL_WIDTH}px`,
       "max-width:85vw",
       "z-index:2147483646",
-      "background:#F9F8F7",
-      "border-left:1px solid #E0E0E0",
+      "background:#FAF9F5",
+      "border-left:1px solid #D6D3CB",
       "box-shadow:-10px 0 30px rgba(0,0,0,.10)",
       "display:block",
     ].join(";");
@@ -81,24 +87,24 @@
         * { box-sizing: border-box; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
         .card {
           display: inline-flex; align-items: center; gap: 12px;
-          background: #F9F8F7; border: 1px solid #E0E0E0; border-radius: 10px;
-          padding: 8px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
-          color: #111; font-size: 13px; white-space: nowrap;
+          background: ${CREAM}; border: 1px solid #D6D3CB; border-radius: 12px;
+          padding: 8px 12px; box-shadow: 0 6px 24px rgba(31,30,29,.14);
+          color: ${INK}; font-size: 14px; white-space: nowrap;
         }
         .logo { width: 18px; height: 18px; flex: 0 0 auto; }
-        .dot { width: 9px; height: 9px; border-radius: 50%; background: #E5484D; animation: pulse 1.2s ease-in-out infinite; }
+        .dot { width: 9px; height: 9px; border-radius: 999px; background: ${DANGER}; animation: pulse 1.2s ease-in-out infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
-        .time { font-variant-numeric: tabular-nums; font-weight: 600; }
-        .spinner { width: 13px; height: 13px; border: 2px solid #ccc; border-top-color: ${ACCENT}; border-radius: 50%; animation: spin .8s linear infinite; }
+        .time { font-variant-numeric: tabular-nums; font-weight: 500; }
+        .spinner { width: 13px; height: 13px; border: 2px solid #E8E6E0; border-top-color: ${ACCENT}; border-radius: 999px; animation: spin .8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         button {
-          border: 0; border-radius: 7px; padding: 6px 12px; font-size: 13px; font-weight: 500;
-          cursor: pointer; color: #fff; background: ${ACCENT};
+          border: 0; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 500;
+          cursor: pointer; color: ${CREAM}; background: ${INK};
         }
-        button.ghost { background: transparent; color: #666; padding: 6px 8px; }
-        button.stop { background: #E5484D; }
-        a { color: ${ACCENT}; text-decoration: none; font-weight: 600; }
-        .muted { color: #888; }
+        button.ghost { background: transparent; color: #6E6D66; padding: 6px 8px; }
+        button.stop { background: ${DANGER}; color: ${CREAM}; }
+        a { color: ${LINK}; text-decoration: none; font-weight: 500; }
+        .muted { color: #9B9A93; }
       </style>
       <div class="card" part="card">
         <svg class="logo" viewBox="0 0 24 24" fill="${ACCENT}" aria-hidden="true">
