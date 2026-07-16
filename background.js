@@ -73,6 +73,21 @@ function sendToOffscreen(message) {
 // --- Message handling ----------------------------------------------------
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // WN_OPEN_PANEL is handled synchronously: in native mode, sidePanel.open()
+  // consumes the user-gesture token from the pill's click, and that token
+  // does not survive an `await`. In docked mode the content script is told to
+  // open its own iframe.
+  if (msg?.type === "WN_OPEN_PANEL") {
+    if (panelModeCache === "native" && chrome.sidePanel && sender?.tab) {
+      chrome.sidePanel
+        .open({ tabId: sender.tab.id })
+        .then(() => sendResponse({ ok: true, mode: "native" }))
+        .catch((e) => sendResponse({ ok: false, mode: "native", error: String(e?.message || e) }));
+    } else {
+      sendResponse({ ok: true, mode: "docked" });
+    }
+    return true;
+  }
   handle(msg, sender).then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e?.message || e) }));
   return true; // async response
 });
@@ -200,6 +215,7 @@ async function handle(msg, sender) {
       return { ok: true };
 
     case "WN_SETTINGS_CHANGED":
+      await refreshPanelMode();
       broadcast();
       return { ok: true };
 
@@ -288,9 +304,26 @@ async function openPanelInTab(tab) {
   }
 }
 
-// Toolbar icon (and ⌘⇧9 via _execute_action): on a Meet tab, open the docked
-// panel — that click is ALSO the activeTab grant that unlocks silent capture.
-// Elsewhere, open the same UI as a full-tab dashboard.
+// --- Panel mode ------------------------------------------------------------
+// "native": the browser renders its real side panel (Chrome, Dia) — the icon
+// click opens it via setPanelBehavior, and pushes the page natively.
+// "docked": browsers that never render that UI (Arc) — the icon click reaches
+// action.onClicked (the behavior flag is off) and we dock the iframe instead.
+// Cached in memory so gesture-sensitive paths never await storage.
+let panelModeCache = "native";
+
+async function refreshPanelMode() {
+  const settings = await store.getSettings();
+  panelModeCache = settings.panelMode === "docked" ? "docked" : "native";
+  chrome.sidePanel
+    ?.setPanelBehavior({ openPanelOnActionClick: panelModeCache === "native" })
+    .catch(() => {});
+}
+
+// Toolbar icon (and ⌘⇧9 via _execute_action). In native mode Chromium opens
+// the side panel itself and this listener never fires. In docked mode: on a
+// Meet tab, open the docked panel — that click is ALSO the activeTab grant
+// that unlocks silent capture. Elsewhere, open a full-tab dashboard.
 chrome.action.onClicked.addListener(async (tab) => {
   if (isMeetTab(tab)) {
     await openPanelInTab(tab);
@@ -317,25 +350,30 @@ function ensureMenus() {
   });
 }
 
-chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
+chrome.contextMenus?.onClicked.addListener((info, tab) => {
   if (!isMeetTab(tab)) return;
-  if (info.menuItemId === "wn-panel") {
-    await openPanelInTab(tab);
-    return;
+  // Open the panel synchronously first: in native mode sidePanel.open() needs
+  // the menu click's user-gesture token, which an `await` would drop.
+  if (panelModeCache === "native" && chrome.sidePanel) {
+    chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+  } else {
+    openPanelInTab(tab);
   }
   if (info.menuItemId === "wn-record") {
-    // The menu click grants activeTab: capture silently, then surface the
-    // panel so the live status is visible.
-    await openPanelInTab(tab);
-    if (state.phase === "recording") return;
-    try {
-      const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-      await beginRecording({ streamId, title: titleFromTab(tab) });
-    } catch (e) {
-      await setState({ phase: "failed", stage: null, error: String(e?.message || e) });
-    }
+    // The menu click grants activeTab: capture silently.
+    recordFromMenu(tab);
   }
 });
+
+async function recordFromMenu(tab) {
+  if (state.phase === "recording") return;
+  try {
+    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
+    await beginRecording({ streamId, title: titleFromTab(tab) });
+  } catch (e) {
+    await setState({ phase: "failed", stage: null, error: String(e?.message || e) });
+  }
+}
 
 // Expose stage labels to any page that wants them via a getter message.
 export { STAGE_LABELS };
@@ -343,6 +381,7 @@ export { STAGE_LABELS };
 function boot() {
   loadState();
   ensureMenus();
+  refreshPanelMode();
 }
 chrome.runtime.onInstalled.addListener(boot);
 chrome.runtime.onStartup.addListener(boot);

@@ -22,6 +22,18 @@
       </section>
 
       <section class="card">
+        <h2>Affichage du panneau</h2>
+        <label>Mode
+          <select id="panelMode">
+            <option value="native">Panneau latéral natif (Dia, Chrome)</option>
+            <option value="docked">Intégré à la page (Arc)</option>
+          </select>
+        </label>
+        <p class="muted small">Le mode natif utilise le side panel du navigateur (il pousse la page).
+        Si votre navigateur ne l'affiche pas (Arc), choisissez « Intégré à la page ».</p>
+      </section>
+
+      <section class="card">
         <h2>Notion</h2>
         <label>ID de la base de données Notion
           <input id="notionDatabaseID" type="text" placeholder="ex: 24f1a2b3c4d5..." />

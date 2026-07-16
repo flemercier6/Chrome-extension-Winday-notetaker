@@ -63,9 +63,13 @@ access is gated by Supabase Auth + RLS).
 
 ## Use
 
-Works in **Chrome** and in **Arc**. The panel is an iframe docked over the right
-edge of the Meet page (Arc has no native side-panel UI, and Meet's JS-driven
-layout defeats CSS "push" tricks — so the panel overlays the page edge).
+Works in **Chrome**, **Dia** and **Arc**. The panel has two display modes
+(Settings → *Affichage du panneau*):
+
+- **Native** (default) — the browser's real side panel (`chrome.sidePanel`),
+  which pushes the page. Use in Chrome and Dia.
+- **Docked** — an iframe docked over the right edge of the Meet page. Use in
+  Arc, which never renders the native panel UI (the API pretends to succeed).
 
 1. Join a **Google Meet** call. A small pill appears at the top of the tab —
    its **Ouvrir le panneau** button opens the docked panel. The toolbar icon

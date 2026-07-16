@@ -152,7 +152,12 @@ function itemRow(m) {
 // --- Actions -------------------------------------------------------------
 
 let panelRecorder = null;
+// Three hosting contexts: embedded iframe in the Meet tab (docked mode),
+// the browser's native side panel (no tab, no parent), or a full-tab
+// dashboard (has a tab).
 const isEmbedded = window.parent !== window;
+let isTabPage = false;
+chrome.tabs.getCurrent().then((t) => { isTabPage = !!t && !isEmbedded; }).catch(() => {});
 
 async function startRecording() {
   // 1) Silent path via the service worker (tabCapture -> offscreen).
@@ -164,12 +169,13 @@ async function startRecording() {
     return recorderHint(r?.error || "Impossible de capturer l'onglet du call.");
   }
 
-  // 2) Fallback: capture HERE via the standard share dialog. Only meaningful
-  //    when this panel is embedded in the Meet tab (preferCurrentTab = it).
-  if (!isEmbedded) {
-    return recorderHint("Ouvrez le panneau depuis l'onglet du call (pilule « Ouvrir le panneau »), puis relancez.");
+  // 2) Fallback: capture HERE via the standard share dialog. Works embedded
+  //    in the Meet tab (one-click, preferCurrentTab) and in the native side
+  //    panel (generic picker). A full-tab dashboard has no call to point at.
+  if (isTabPage) {
+    return recorderHint("Ouvrez le panneau depuis l'onglet du call, puis relancez.");
   }
-  recorderHint("Dans la fenêtre de partage : choisissez cet onglet et laissez « Partager l'audio » activé.", false);
+  recorderHint("Dans la fenêtre de partage : choisissez l'onglet du call et laissez « Partager l'audio » activé.", false);
   let tabStream;
   try {
     tabStream = await captureThisTab();
@@ -217,16 +223,15 @@ async function startRecording() {
   });
 }
 
-/** getDisplayMedia scoped to this iframe's top-level tab — the Meet tab. */
+/** getDisplayMedia — scoped to this iframe's top-level tab (the Meet tab)
+ *  when embedded; the generic tab picker from the native side panel. */
 async function captureThisTab() {
   const base = { video: true, audio: true };
+  const scoped = isEmbedded
+    ? { ...base, preferCurrentTab: true, selfBrowserSurface: "include", systemAudio: "include" }
+    : { ...base, systemAudio: "include" };
   try {
-    return await navigator.mediaDevices.getDisplayMedia({
-      ...base,
-      preferCurrentTab: true,
-      selfBrowserSurface: "include",
-      systemAudio: "include",
-    });
+    return await navigator.mediaDevices.getDisplayMedia(scoped);
   } catch (e) {
     // Older builds reject unknown dictionary members with a TypeError: retry
     // with the plain form (generic picker; the user picks the call's tab).
@@ -316,9 +321,12 @@ $("btn-signout").addEventListener("click", async () => { sb.signOut(); await sto
 $("btn-settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
 $("mic-link").addEventListener("click", (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
 
-// ✕ closes the companion window; the service worker gives the freed width
-// back to the call's window.
+// ✕ — embedded iframe: ask the host page (via the service worker) to hide it;
+// native side panel or dashboard tab: window.close() does the right thing.
 $("btn-close").classList.remove("hidden");
-$("btn-close").addEventListener("click", () => chrome.runtime.sendMessage({ type: "WN_CLOSE_PANEL" }).catch(() => {}));
+$("btn-close").addEventListener("click", () => {
+  if (isEmbedded) chrome.runtime.sendMessage({ type: "WN_CLOSE_PANEL" }).catch(() => {});
+  else window.close();
+});
 
 refresh();

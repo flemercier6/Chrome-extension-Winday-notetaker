@@ -1,10 +1,11 @@
 import * as store from "../lib/store.js";
 
 const $ = (id) => document.getElementById(id);
-const fields = ["notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
+const fields = ["panelMode", "notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
 
 async function load() {
   const s = await store.getSettings();
+  $("panelMode").value = s.panelMode === "docked" ? "docked" : "native";
   $("notionDatabaseID").value = s.notionDatabaseID;
   $("autoExportToNotion").checked = s.autoExportToNotion;
   $("summaryPrompt").value = s.summaryPrompt;
@@ -16,6 +17,7 @@ async function load() {
 
 async function save() {
   const patch = {
+    panelMode: $("panelMode").value === "docked" ? "docked" : "native",
     notionDatabaseID: $("notionDatabaseID").value.trim(),
     autoExportToNotion: $("autoExportToNotion").checked,
     summaryPrompt: $("summaryPrompt").value,
@@ -56,7 +58,8 @@ async function requestMic() {
 // Wire up
 for (const id of fields) {
   const el = $(id);
-  el.addEventListener(el.type === "checkbox" ? "change" : "input", save);
+  const evt = el.tagName === "SELECT" || el.type === "checkbox" ? "change" : "input";
+  el.addEventListener(evt, save);
 }
 $("btn-reset-prompt").addEventListener("click", async () => {
   $("summaryPrompt").value = store.DEFAULT_SUMMARY_PROMPT;

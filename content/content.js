@@ -163,9 +163,14 @@
       if (state.meetingId) b.append(button("Réessayer", "", () => send("WN_RETRY", { id: state.meetingId })));
       b.append(button("✕", "ghost", () => send("WN_DISMISS")));
     } else {
-      // idle + in a call: open the docked panel (record button lives there).
+      // idle + in a call: open the panel (record button lives there). The
+      // service worker decides the mode: native side panel (Chrome/Dia) or,
+      // for browsers that don't render it (Arc), our docked iframe.
       const label = document.createElement("span"); label.textContent = "Winday Notetaker";
-      const open = button("Ouvrir le panneau", "", () => openPanel());
+      const open = button("Ouvrir le panneau", "", async () => {
+        const r = await send("WN_OPEN_PANEL");
+        if (!r || r.mode === "docked" || r.ok === false) openPanel();
+      });
       b.append(label, open);
     }
   }
