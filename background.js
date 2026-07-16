@@ -372,16 +372,14 @@ async function refreshPanelMode() {
 // show the live transcript. On other Meet pages, just open the panel; elsewhere,
 // open the full-tab dashboard.
 chrome.action.onClicked.addListener((tab) => {
-  if (!isMeetTab(tab)) {
-    chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel/sidepanel.html") });
-    return;
-  }
   // Open the panel synchronously — the native side panel needs this click's
   // user-gesture token, which an await would drop.
   if (panelModeCache === "native" && chrome.sidePanel) {
-    chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
-  } else {
+    chrome.sidePanel.open(tab && tab.id != null ? { tabId: tab.id } : {}).catch(() => {});
+  } else if (isMeetTab(tab)) {
     openPanelInTab(tab);
+  } else {
+    chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel/sidepanel.html") });
   }
   // In a call and idle → record it silently (the click just granted activeTab).
   if (isCallTab(tab) && state.phase === "idle") recordFromMenu(tab);
