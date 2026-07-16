@@ -3,12 +3,13 @@ import { requestMicPermission } from "../lib/capture.js";
 import { applyTheme } from "../lib/theme.js";
 
 const $ = (id) => document.getElementById(id);
-const fields = ["theme", "panelMode", "notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
+const fields = ["theme", "transcriptionLanguage", "panelMode", "notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
 
 async function load() {
   const s = await store.getSettings();
   applyTheme(s.theme);
   $("theme").value = s.theme;
+  $("transcriptionLanguage").value = s.transcriptionLanguage || "multi";
   $("panelMode").value = s.panelMode === "docked" ? "docked" : "native";
   $("notionDatabaseID").value = s.notionDatabaseID;
   $("autoExportToNotion").checked = s.autoExportToNotion;
@@ -22,6 +23,7 @@ async function load() {
 async function save() {
   const patch = {
     theme: $("theme").value,
+    transcriptionLanguage: $("transcriptionLanguage").value,
     panelMode: $("panelMode").value === "docked" ? "docked" : "native",
     notionDatabaseID: $("notionDatabaseID").value.trim(),
     autoExportToNotion: $("autoExportToNotion").checked,

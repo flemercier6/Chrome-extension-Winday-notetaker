@@ -39,8 +39,11 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: "Unauthorized" }, 401);
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
-    const { meeting_id, deepgram_model } = await req.json();
+    const { meeting_id, deepgram_model, deepgram_language } = await req.json();
     const model = deepgram_model || "nova-3";
+    // A specific language pins transcription; "multi"/unset auto-detects the
+    // dominant language (pre-recorded supports detect_language for any language).
+    const lang = deepgram_language && deepgram_language !== "multi" ? deepgram_language : null;
 
     const { data: meeting, error: mErr } = await admin
       .from("meetings").select("*").eq("id", meeting_id).eq("user_id", user.id).single();
@@ -52,7 +55,7 @@ Deno.serve(async (req) => {
     if (sErr || !signed) return json({ error: "Could not sign audio URL" }, 500);
 
     const dgUrl = new URL("https://api.deepgram.com/v1/listen");
-    for (const [k, v] of Object.entries({
+    const dgParams: Record<string, string> = {
       model,
       multichannel: "true",
       diarize: "true",
@@ -60,8 +63,10 @@ Deno.serve(async (req) => {
       numerals: "true",
       utterances: "true",
       smart_format: "true",
-      detect_language: "true",
-    })) dgUrl.searchParams.set(k, v);
+    };
+    if (lang) dgParams.language = lang;        // pinned language
+    else dgParams.detect_language = "true";    // auto-detect any language
+    for (const [k, v] of Object.entries(dgParams)) dgUrl.searchParams.set(k, v);
 
     const dgResp = await fetch(dgUrl, {
       method: "POST",
@@ -115,7 +120,7 @@ Deno.serve(async (req) => {
     }
 
     const fullText = utterances.map((u: any) => u.text).join(" ");
-    const language = dg?.results?.channels?.[0]?.detected_language ?? null;
+    const language = dg?.results?.channels?.[0]?.detected_language ?? lang ?? null;
 
     // Structured payload the app + CRM UI consume.
     const transcript = { fullText, utterances, language };

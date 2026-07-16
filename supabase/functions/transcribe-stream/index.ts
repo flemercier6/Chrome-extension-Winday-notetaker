@@ -39,6 +39,10 @@ Deno.serve(async (req) => {
   const dg = new URL("wss://api.deepgram.com/v1/listen");
   const dgParams: Record<string, string> = {
     model: q.get("model") || "nova-3",
+    // Streaming has no language auto-detect — without this it defaults to
+    // English. "multi" is Nova-3's real-time code-switching mode (EN/FR/ES/DE/
+    // HI/RU/PT/JA/IT/NL); a specific BCP-47 tag pins one language.
+    language: q.get("language") || "multi",
     encoding: "linear16",
     sample_rate: q.get("sample_rate") || "48000",
     channels,
