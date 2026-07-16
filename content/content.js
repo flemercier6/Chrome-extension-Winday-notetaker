@@ -166,7 +166,7 @@
       // idle + in a call: open the panel (record button lives there). The
       // service worker decides the mode: native side panel (Chrome/Dia) or,
       // for browsers that don't render it (Arc), our docked iframe.
-      const label = document.createElement("span"); label.textContent = "Winday Notetaker";
+      const label = document.createElement("span"); label.textContent = "Winday Meet";
       const open = button("Ouvrir le panneau", "", async () => {
         const r = await send("WN_OPEN_PANEL");
         if (!r || r.mode === "docked" || r.ok === false) openPanel();

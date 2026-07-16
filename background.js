@@ -337,13 +337,13 @@ function ensureMenus() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: "wn-record",
-      title: "Winday Notetaker — Enregistrer ce call",
+      title: "Winday Meet — Enregistrer ce call",
       contexts: ["page"],
       documentUrlPatterns: ["https://meet.google.com/*"],
     });
     chrome.contextMenus.create({
       id: "wn-panel",
-      title: "Winday Notetaker — Ouvrir le panneau",
+      title: "Winday Meet — Ouvrir le panneau",
       contexts: ["page"],
       documentUrlPatterns: ["https://meet.google.com/*"],
     });

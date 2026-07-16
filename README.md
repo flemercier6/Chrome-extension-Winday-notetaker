@@ -1,4 +1,4 @@
-# Winday Notetaker — Chrome Extension
+# Winday Meet — Chrome Extension
 
 A **Chrome extension (Manifest V3)** that records your **Google Meet** calls,
 transcribes them with **Deepgram (Nova‑3)**, summarizes them with **Gemini
@@ -57,7 +57,7 @@ access is gated by Supabase Auth + RLS).
 1. Open `chrome://extensions`.
 2. Toggle **Developer mode** (top‑right).
 3. Click **Load unpacked** and select this folder.
-4. Pin the **Winday Notetaker** icon to the toolbar.
+4. Pin the **Winday Meet** icon to the toolbar.
 
 > The icons are prebuilt. To regenerate them: `node icons/gen-icons.mjs`.
 
@@ -86,7 +86,7 @@ Works in **Chrome**, **Dia** and **Arc**. The panel has two display modes
      for screen sharing, present in every Chromium including Arc. Pick the
      call's tab, keep *Partager l'audio* enabled, **Partager** → recording
      starts, hosted inside the panel iframe.
-   - **Right‑click the call page → “Winday Notetaker — Enregistrer ce call”** —
+   - **Right‑click the call page → “Winday Meet — Enregistrer ce call”** —
      fully silent (the menu click itself authorizes the capture, no dialog).
 4. The elapsed time stays visible in the panel and the pill; stop from either.
 5. When you stop, the extension uploads, transcribes, summarizes and (if

@@ -1,4 +1,4 @@
-// Build-time configuration for the Winday Notetaker Chrome extension.
+// Build-time configuration for the Winday Meet Chrome extension.
 //
 // IMPORTANT: no third-party API secrets live here. Deepgram, Gemini and Notion
 // keys are stored server-side as Supabase Edge Function secrets (shared with the
