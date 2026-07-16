@@ -25,14 +25,10 @@
       <!-- Signed-in view -->
       <section id="main" class="hidden">
         <header>
-          <div class="brand">
-            <img src="../icons/icon48.png" width="18" height="18" alt="" />
-            <span>Winday Meet</span>
-          </div>
+          <button id="btn-back" class="icon hidden" title="Back to recordings">‹ Recordings</button>
           <div class="header-right">
-            <span id="user-email" class="muted small"></span>
             <button id="btn-settings" class="icon" title="Settings">⚙</button>
-            <button id="btn-close" class="icon hidden" title="Close panel">✕</button>
+            <button id="btn-signout" class="icon" title="Sign out">⎋</button>
           </div>
         </header>
 
@@ -41,14 +37,29 @@
           <div id="mic-banner-error" class="error small hidden" style="margin-top: 4px"></div>
         </div>
 
-        <div id="recorder" class="recorder card"></div>
+        <!-- Content: the recordings list when idle, or the live session (tabs). -->
+        <div id="content" class="content">
+          <div id="list-view">
+            <div class="section-title">Recordings</div>
+            <div id="list" class="list"></div>
+          </div>
 
-        <div class="section-title">Recordings</div>
-        <div id="list" class="list"></div>
+          <div id="session-view" class="hidden">
+            <div class="tabs" role="tablist">
+              <button class="tab" id="tab-btn-transcript" data-tab="transcript">Transcript</button>
+              <button class="tab" id="tab-btn-summary" data-tab="summary">Summary</button>
+            </div>
+            <div id="tab-transcript" class="tabpanel">
+              <div id="transcript" class="transcript"></div>
+            </div>
+            <div id="tab-summary" class="tabpanel hidden">
+              <div id="summary" class="summary"></div>
+            </div>
+          </div>
+        </div>
 
-        <footer>
-          <button id="btn-signout" class="ghost small">Sign out</button>
-        </footer>
+        <!-- Bottom bar: Start Recording / visualizer + timer + Stop / status. -->
+        <div id="bottombar" class="bottombar"></div>
       </section>
     </div>
     <script type="module" src="sidepanel.js"></script>

@@ -30,6 +30,12 @@ let session = null;
 let micGranted = false;
 let timer = null;
 
+// Live session state (during + right after a recording).
+let liveUtterances = [];      // committed finals: { channel, speaker, text }
+let interim = {};             // in-progress text per channel: { 0:{speaker,text}, 1:{…} }
+let vizBars = null;           // latest visualizer levels (array of 0..1)
+let activeTab = "transcript"; // which session tab is shown
+
 // --- Boot ----------------------------------------------------------------
 
 async function refresh() {
@@ -46,13 +52,38 @@ async function refresh() {
   render();
 }
 
+// Live transcript + visualizer events. They reach an open panel over runtime
+// messaging when the OFFSCREEN document hosts recording; when THIS panel hosts
+// it, capture.js delivers them through its onEvent hook (a context can't
+// receive its own runtime messages).
+function handleRecEvent(msg) {
+  if (msg.type === "WN_TRANSCRIPT") {
+    const ch = msg.channel || 0;
+    if (msg.isFinal) {
+      if (msg.text) liveUtterances.push({ channel: ch, speaker: msg.speaker, text: msg.text });
+      delete interim[ch];
+    } else {
+      interim[ch] = { speaker: msg.speaker, text: msg.text };
+    }
+    if (!$("session-view").classList.contains("hidden") && activeTab === "transcript") renderTranscript();
+  } else if (msg.type === "WN_REC_LEVEL") {
+    vizBars = msg.bars;
+    renderViz();
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "WN_STATE") {
+    const prev = state.phase;
     state = msg.state || { phase: "idle" };
-    // Re-read session + micGranted from storage: web sign-in stores the session
-    // in the service worker and broadcasts WN_STATE, and granting the mic from
-    // any surface does too — so every open panel flips to signed-in / drops its
-    // banner without its own round trip.
+    // A fresh recording clears the previous session's transcript; finishing one
+    // (transcript done) flips to the Summary tab — the requested flow.
+    if (prev !== "recording" && state.phase === "recording") {
+      liveUtterances = []; interim = {}; vizBars = null; activeTab = "transcript";
+    }
+    if (prev === "recording" && state.phase !== "recording") activeTab = "summary";
+    // Re-read session + micGranted from storage (web sign-in / mic grant happen
+    // in the service worker and only broadcast WN_STATE).
     Promise.all([store.getMeetings(), store.getMicGranted(), store.getSession()]).then(([m, mic, sess]) => {
       meetings = m;
       micGranted = mic;
@@ -61,8 +92,8 @@ chrome.runtime.onMessage.addListener((msg) => {
     });
     syncTheme(); // a settings change (e.g. Theme) also arrives as WN_STATE
   }
-  // Stop/cancel routed by the service worker when THIS panel hosts the
-  // fallback recording.
+  if (msg?.type === "WN_TRANSCRIPT" || msg?.type === "WN_REC_LEVEL") handleRecEvent(msg);
+  // Stop/cancel routed by the service worker when THIS panel hosts the recording.
   if (msg?.type === "WN_PANEL_STOP") panelRecorder?.stop(false);
   if (msg?.type === "WN_PANEL_CANCEL") panelRecorder?.stop(true);
 });
@@ -76,47 +107,167 @@ function render() {
   $("main").classList.toggle("hidden", !signedIn);
   if (!signedIn) return;
 
-  $("user-email").textContent = session.email || "";
   $("mic-banner").classList.toggle("hidden", micGranted);
-  renderRecorder();
-  renderList();
+
+  const phase = state.phase;
+  const inSession = phase === "recording" || phase === "processing" || phase === "done" || phase === "failed";
+  $("list-view").classList.toggle("hidden", inSession);
+  $("session-view").classList.toggle("hidden", !inSession);
+  $("btn-back").classList.toggle("hidden", !(phase === "done" || phase === "failed"));
+
+  if (inSession) renderSession(); else renderList();
+  renderBottomBar();
 }
 
-function renderRecorder() {
-  const box = $("recorder");
+// --- Live session (transcript + summary tabs) ----------------------------
+
+function renderSession() {
+  const recording = state.phase === "recording";
+  $("tab-btn-summary").disabled = recording; // no summary until the transcript is done
+  if (recording && activeTab === "summary") activeTab = "transcript";
+  setTab(activeTab);
+  if (activeTab === "transcript") renderTranscript();
+  else renderSummary();
+}
+
+function setTab(tab) {
+  activeTab = tab;
+  $("tab-btn-transcript").classList.toggle("active", tab === "transcript");
+  $("tab-btn-summary").classList.toggle("active", tab === "summary");
+  $("tab-transcript").classList.toggle("hidden", tab !== "transcript");
+  $("tab-summary").classList.toggle("hidden", tab !== "summary");
+}
+
+function renderTranscript() {
+  const box = $("transcript");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
   box.innerHTML = "";
+
+  const bubbles = liveUtterances.slice();
+  for (const ch of Object.keys(interim)) {
+    const it = interim[ch];
+    if (it && it.text) bubbles.push({ channel: Number(ch), speaker: it.speaker, text: it.text, interim: true });
+  }
+  if (bubbles.length === 0) {
+    const e = div("transcript-empty");
+    e.textContent = state.phase === "recording" ? "Listening… speech appears here as it's spoken." : "No transcript.";
+    box.append(e);
+    return;
+  }
+  for (const b of bubbles) {
+    const el = div("utt " + (b.channel === 0 ? "you" : "them") + (b.interim ? " interim" : ""));
+    const who = div("who");
+    who.textContent = b.channel === 0 ? "You" : (b.speaker || "Participant");
+    const t = document.createElement("div");
+    t.textContent = b.text;
+    el.append(who, t);
+    box.append(el);
+  }
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function renderSummary() {
+  const box = $("summary");
+  box.innerHTML = "";
+  const m = meetings.find((x) => x.id === state.meetingId) || null;
+
+  if (state.phase === "processing") {
+    const p = div("summary-pending");
+    p.append(span("spinner"), text(stageLabel(state.stage)));
+    box.append(p);
+    return;
+  }
+  if (state.phase === "failed") {
+    const p = div("summary-pending");
+    const e = document.createElement("div");
+    e.className = "error";
+    e.textContent = "⚠︎ " + (state.error || "Processing failed");
+    p.append(e);
+    if (state.meetingId) p.append(btn("Retry", "linkbtn", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: state.meetingId })));
+    box.append(p);
+    return;
+  }
+
+  const summary = m && m.summary;
+  if (!summary) { const p = div("summary-pending"); p.append(text("Summary not available.")); box.append(p); return; }
+
+  if (summary.headline) { const h = document.createElement("h2"); h.textContent = summary.headline; box.append(h); }
+  if (summary.summary) { const p = document.createElement("p"); p.textContent = summary.summary; box.append(p); }
+  if (summary.key_points && summary.key_points.length) {
+    const s = document.createElement("section");
+    const h = document.createElement("h3"); h.textContent = "Key points";
+    const ul = document.createElement("ul");
+    for (const kp of summary.key_points) { const li = document.createElement("li"); li.textContent = kp; ul.append(li); }
+    s.append(h, ul); box.append(s);
+  }
+  if (summary.next_steps && summary.next_steps.length) {
+    const s = document.createElement("section");
+    const h = document.createElement("h3"); h.textContent = "Next steps";
+    const ul = document.createElement("ul");
+    for (const ns of summary.next_steps) {
+      const li = document.createElement("li"); li.className = "step";
+      const prio = span("prio " + (ns.priority || "low")); prio.textContent = ns.priority || "low";
+      const task = document.createElement("span"); task.className = "task";
+      task.textContent = ns.task + (ns.owner ? ` — ${ns.owner}` : "");
+      li.append(prio, task); ul.append(li);
+    }
+    s.append(h, ul); box.append(s);
+  }
+
+  const links = div("links");
+  const notion = (m && m.notionPageURL) || state.notionURL || null;
+  if (notion) links.append(linkA("Open in Notion", notion)); // Notion only if exported
+  links.append(linkA("Open in CRM", crmURL(m || { id: state.meetingId })));
+  box.append(links);
+}
+
+// --- Bottom bar ----------------------------------------------------------
+
+function renderBottomBar() {
+  const bar = $("bottombar");
+  bar.innerHTML = "";
   const phase = state.phase;
 
   if (phase === "recording") {
-    const status = div("status");
-    status.append(span("dot"), timeEl());
-    const stop = btn("Stop & save", "stop", () => chrome.runtime.sendMessage({ type: "WN_STOP" }));
-    const cancel = btn("Cancel (don't keep)", "ghost", () => chrome.runtime.sendMessage({ type: "WN_CANCEL" }));
-    box.append(status, stop, cancel);
+    const row = div("rec-controls");
+    const viz = div("viz"); viz.id = "viz";
+    for (let i = 0; i < 24; i++) viz.append(div("bar"));
+    const stop = btn("Stop", "stop-btn", () => chrome.runtime.sendMessage({ type: "WN_STOP" }));
+    const cancel = btn("✕", "ghost cancel-btn", () => chrome.runtime.sendMessage({ type: "WN_CANCEL" }));
+    cancel.title = "Discard";
+    row.append(viz, timeEl(), stop, cancel);
+    bar.append(row);
+    renderViz();
   } else if (phase === "processing") {
-    const status = div("status");
-    status.append(span("spinner"), text(stageLabel(state.stage)));
-    box.append(status);
-  } else if (phase === "done") {
-    const status = div("status");
-    status.append(text("✅ Notes ready"));
-    box.append(status);
-    if (state.notionURL) box.append(linkBtn("Open in Notion", state.notionURL));
-    box.append(btn("OK", "ghost", () => chrome.runtime.sendMessage({ type: "WN_DISMISS" })));
-  } else if (phase === "failed") {
-    const status = div("status");
-    status.append(text("⚠︎ " + (state.error || "Processing failed")));
-    box.append(status);
-    if (state.meetingId) box.append(btn("Retry", "record", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: state.meetingId })));
-    box.append(btn("Dismiss", "ghost", () => chrome.runtime.sendMessage({ type: "WN_DISMISS" })));
+    const s = div("status-bar");
+    s.append(span("spinner"), text(stageLabel(state.stage)));
+    bar.append(s);
   } else {
-    const rec = btn("● Record this call", "record", startRecording);
-    box.append(rec);
-    const hint = document.createElement("div");
-    hint.className = "hint";
-    hint.textContent = "Open your Google Meet tab, then start recording.";
-    box.append(hint);
+    // idle / done / failed → start a (new) recording
+    bar.append(btn("🎙  Start Recording", "start", startRecording));
   }
+}
+
+function renderViz() {
+  const viz = $("viz");
+  if (!viz) return;
+  const bars = viz.querySelectorAll(".bar");
+  if (!bars.length) return;
+  const data = vizBars || [];
+  for (let i = 0; i < bars.length; i++) {
+    const v = data[i] != null ? data[i] : 0;
+    bars[i].style.height = Math.max(8, Math.round(v * 100)) + "%";
+  }
+}
+
+function linkA(label, url) {
+  const a = document.createElement("a");
+  a.className = "linkbtn";
+  a.textContent = label;
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noreferrer";
+  return a;
 }
 
 function renderList() {
@@ -224,13 +375,15 @@ async function startRecording() {
       meeting,
       session: await store.getSession(),
       settings: await store.getSettings(),
+      // This context can't receive its own runtime messages, so take the live
+      // transcript + level events directly.
+      onEvent: (m) => { if (m.type === "WN_TRANSCRIPT" || m.type === "WN_REC_LEVEL") handleRecEvent(m); },
     });
   } catch (e) {
     panelRecorder.failNow(e);
     panelRecorder = null;
     return;
   }
-  recorderHint("", false);
   await chrome.runtime
     .sendMessage({ type: "WN_PANEL_REC_STARTED", meeting: { id: meeting.id, title: meeting.title, startedAt: meeting.startedAt } })
     .catch(() => {});
@@ -259,13 +412,19 @@ async function captureThisTab() {
   }
 }
 
+// Show a start-flow message in the bottom bar (share-dialog guidance, errors).
+// On an error, keep a Start button so the user can retry right there.
 function recorderHint(msg, isError = true) {
-  const box = $("recorder");
-  const hint = box.querySelector(".hint") || document.createElement("div");
-  hint.className = "hint";
-  hint.style.color = isError ? "#c0392b" : "";
-  hint.textContent = msg;
-  if (!hint.parentNode) box.append(hint);
+  const bar = $("bottombar");
+  bar.innerHTML = "";
+  const s = div("status-bar");
+  const t = document.createElement("div");
+  if (isError) t.className = "error";
+  t.style.textAlign = "center";
+  t.textContent = msg;
+  s.append(t);
+  bar.append(s);
+  if (isError) bar.append(btn("🎙  Start Recording", "start", startRecording));
 }
 
 // --- Helpers -------------------------------------------------------------
@@ -310,7 +469,6 @@ function text(t) { const s = document.createElement("span"); s.textContent = t; 
 function btn(label, cls, onClick) { const b = document.createElement("button"); b.textContent = label; b.className = cls; b.addEventListener("click", onClick); return b; }
 function iconBtn(label, title, onClick) { const b = document.createElement("button"); b.textContent = label; b.title = title; b.addEventListener("click", onClick); return b; }
 function iconLink(label, title, url) { const a = document.createElement("button"); a.textContent = label; a.title = title; a.addEventListener("click", () => chrome.tabs.create({ url })); return a; }
-function linkBtn(label, url) { return btn(label, "record", () => chrome.tabs.create({ url })); }
 
 /** Opens Settings as a plain tab instead of chrome.runtime.openOptionsPage() —
  *  that API can silently no-op on some Chromium forks (no error, no tab), which
@@ -362,12 +520,15 @@ $("mic-link").addEventListener("click", async (e) => {
   }
 });
 
-// ✕ — embedded iframe: ask the host page (via the service worker) to hide it;
-// native side panel or dashboard tab: window.close() does the right thing.
-$("btn-close").classList.remove("hidden");
-$("btn-close").addEventListener("click", () => {
-  if (isEmbedded) chrome.runtime.sendMessage({ type: "WN_CLOSE_PANEL" }).catch(() => {});
-  else window.close();
+// Back to the recordings list from a finished session.
+$("btn-back").addEventListener("click", () => chrome.runtime.sendMessage({ type: "WN_DISMISS" }).catch(() => {}));
+
+// Tabs.
+$("tab-btn-transcript").addEventListener("click", () => { setTab("transcript"); renderTranscript(); });
+$("tab-btn-summary").addEventListener("click", () => {
+  if ($("tab-btn-summary").disabled) return;
+  setTab("summary");
+  renderSummary();
 });
 
 refresh();
