@@ -268,25 +268,6 @@ function recorderHint(msg, isError = true) {
   if (!hint.parentNode) box.append(hint);
 }
 
-async function doSignIn(kind) {
-  const email = $("email").value.trim();
-  const password = $("password").value;
-  const err = $("auth-error");
-  err.classList.add("hidden");
-  if (!email || !password) return;
-  $("btn-signin").disabled = $("btn-signup").disabled = true;
-  try {
-    session = kind === "up" ? await sb.signUp(email, password) : await sb.signIn(email, password);
-    await store.setSession(session); // the REST client keeps it in memory only; persist it here
-    await refresh();
-  } catch (e) {
-    err.textContent = e?.message || String(e);
-    err.classList.remove("hidden");
-  } finally {
-    $("btn-signin").disabled = $("btn-signup").disabled = false;
-  }
-}
-
 // --- Helpers -------------------------------------------------------------
 
 function subtitle(m) {
@@ -353,37 +334,12 @@ async function openSettings() {
 
 // --- Events --------------------------------------------------------------
 
-// Feedback line under the sign-in button. Empty and hidden by default (no
-// standing instructions) — it only appears once there's a status/error to show.
-function signinHint(msg) {
-  const el = $("signin-hint");
-  if (!el) return;
-  el.textContent = msg;
-  el.classList.remove("hidden");
-}
-
-// Web sign-in: open the Winday CRM in a popup; its content script bridges the
+// Web sign-in: open the Winday CRM in a tab; its content script bridges the
 // session back (WN_WEB_SESSION -> stored -> WN_STATE broadcast -> render flips
 // this panel to the signed-in view). No password handled by the extension.
-$("btn-web-signin").addEventListener("click", async () => {
-  signinHint("Winday window opened — sign in, then come back here.");
-  const r = await chrome.runtime
-    .sendMessage({ type: "WN_SIGN_IN_WEB" })
-    .catch((e) => ({ ok: false, error: String(e?.message || e) }));
-  if (!r || r.ok === false) {
-    signinHint("Couldn't open the sign-in window" + (r?.error ? " (" + r.error + ")" : "") + ".");
-  }
+$("btn-web-signin").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "WN_SIGN_IN_WEB" }).catch(() => {});
 });
-$("toggle-email").addEventListener("click", (e) => {
-  e.preventDefault();
-  const f = $("email-form");
-  f.classList.toggle("hidden");
-  if (!f.classList.contains("hidden")) $("email").focus();
-});
-
-$("btn-signin").addEventListener("click", () => doSignIn("in"));
-$("btn-signup").addEventListener("click", () => doSignIn("up"));
-$("password").addEventListener("keydown", (e) => { if (e.key === "Enter") doSignIn("in"); });
 $("btn-signout").addEventListener("click", async () => { sb.signOut(); await store.setSession(null); session = null; render(); });
 $("btn-settings").addEventListener("click", openSettings);
 
