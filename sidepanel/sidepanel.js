@@ -681,3 +681,17 @@ refresh();
 // Keep the "Today" section honest while the panel stays open: passed calls
 // drop off and the "Now" chip appears as start times arrive.
 setInterval(syncUpcoming, 60_000);
+
+// Presence beacon: hold a port open for as long as this panel exists, so the
+// Meet pill can hide while the side panel is showing. Docked (iframe) panels
+// use a different name — the content script tracks their visibility itself,
+// since the iframe stays alive even when hidden.
+(function announcePresence() {
+  try {
+    const name = window.top === window ? "wn-panel-native" : "wn-panel-docked";
+    const port = chrome.runtime.connect({ name });
+    // If the service worker restarts, the port drops — reconnect so the
+    // "panel open" flag survives SW lifecycles.
+    port.onDisconnect.addListener(() => setTimeout(announcePresence, 500));
+  } catch (_) { /* extension context going away */ }
+})();

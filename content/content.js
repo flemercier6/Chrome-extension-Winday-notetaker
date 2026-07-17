@@ -42,12 +42,23 @@
   let state = { phase: "idle" };
   let inCall = false;
   let tick = null;
+  let dismissedKey = null; // pill closed via its ✕, for the current prompt only
+
+  // Identity of what the pill is currently prompting for — the dismissal
+  // sticks to THIS call/prompt and naturally clears when it changes.
+  function pillKey() {
+    if (inCall) return "call:" + location.pathname;
+    const imm = state.imminentCall || null;
+    if (imm) return "imm:" + (imm.meet_url || imm.title || "x");
+    return null;
+  }
 
   // --- Docked panel -------------------------------------------------------
 
   function openPanel() {
     if (panelHost) {
       panelHost.style.display = "block";
+      render(); // the pill hides while the docked panel shows
       return;
     }
     panelHost = document.createElement("winday-panel");
@@ -72,10 +83,12 @@
     frame.style.cssText = "width:100%;height:100%;border:0;display:block;background:transparent;";
     panelHost.appendChild(frame);
     document.documentElement.appendChild(panelHost);
+    render(); // the pill hides while the docked panel shows
   }
 
   function hidePanel() {
     if (panelHost) panelHost.style.display = "none";
+    render(); // panel gone -> the pill may come back
   }
 
   api.open = openPanel;
@@ -91,18 +104,31 @@
     if (host) return;
     host = document.createElement("div");
     host.id = "winday-notetaker-root";
+    // Top-right, tucked under the browser toolbar's extension icon.
     host.style.cssText =
-      "position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483647;";
+      "position:fixed;top:10px;right:16px;z-index:2147483647;";
     root = host.attachShadow({ mode: "open" });
     root.innerHTML = `
       <style>
         * { box-sizing: border-box; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
         .card {
+          position: relative;
           display: inline-flex; align-items: center; gap: 12px;
           background: ${P.cardBg}; border: 1px solid ${P.cardBorder}; border-radius: 12px;
           padding: 8px 12px; box-shadow: 0 6px 24px ${P.shadow};
           color: ${P.text}; font-size: 14px; white-space: nowrap;
         }
+        .close {
+          position: absolute; top: -8px; left: -8px; width: 20px; height: 20px;
+          display: flex; align-items: center; justify-content: center; padding: 0;
+          border-radius: 999px; border: 1px solid ${P.cardBorder};
+          background: ${P.btnBg}; color: ${P.btnText}; cursor: pointer;
+          box-shadow: 0 2px 8px ${P.shadow};
+          opacity: 0; pointer-events: none; transition: opacity 0.12s ease;
+        }
+        .card:hover .close { opacity: 1; pointer-events: auto; }
+        .close svg { display: block; }
+        .body { display: inline-flex; align-items: center; gap: 10px; }
         .logo { width: 18px; height: 18px; flex: 0 0 auto; }
         .dot { width: 9px; height: 9px; border-radius: 999px; background: ${P.danger}; animation: pulse 1.2s ease-in-out infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
@@ -121,6 +147,9 @@
         .muted { color: ${P.muted}; }
       </style>
       <div class="card" part="card">
+        <button class="close" title="Dismiss" aria-label="Dismiss">
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none">${ICONS.cancel}</svg>
+        </button>
         <svg class="logo" viewBox="0 0 24 24" fill="${P.accent}" aria-hidden="true">
           <rect x="3" y="9" width="2.5" height="6" rx="1.25"/>
           <rect x="7.5" y="6" width="2.5" height="12" rx="1.25"/>
@@ -131,6 +160,10 @@
         <span class="body"></span>
       </div>`;
     els = { card: root.querySelector(".card"), body: root.querySelector(".body") };
+    root.querySelector(".close").addEventListener("click", () => {
+      dismissedKey = pillKey(); // stay hidden for THIS call/prompt only
+      unmount();
+    });
     document.documentElement.appendChild(host);
   }
 
@@ -155,6 +188,12 @@
     const phase = state.phase || "idle";
     const imm = state.imminentCall || null;
     if (phase !== "idle" || (!inCall && !imm)) { unmount(); return; }
+    // While a panel is showing — the native side panel (anywhere) or this
+    // page's docked iframe — the pill is redundant: stay away.
+    const panelShowing = state.panelOpen === true || (panelHost && panelHost.style.display !== "none");
+    if (panelShowing) { unmount(); return; }
+    // Closed via its ✕ for this specific prompt.
+    if (dismissedKey && dismissedKey === pillKey()) { unmount(); return; }
     mount();
     const b = els.body;
     b.innerHTML = "";
@@ -188,6 +227,7 @@
   const ICONS = {
     mic: '<path d="M17 7V11C17 13.7614 14.7614 16 12 16C9.23858 16 7 13.7614 7 11V7C7 4.23858 9.23858 2 12 2C14.7614 2 17 4.23858 17 7Z" stroke="currentColor" stroke-width="1.5"/><path d="M17 7H14M17 11H14" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M20 11C20 15.4183 16.4183 19 12 19M12 19C7.58172 19 4 15.4183 4 11M12 19V22M12 22H15M12 22H9" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>',
     join: '<path d="M2 11C2 7.70017 2 6.05025 3.02513 5.02513C4.05025 4 5.70017 4 9 4H10C13.2998 4 14.9497 4 15.9749 5.02513C17 6.05025 17 7.70017 17 11V13C17 16.2998 17 17.9497 15.9749 18.9749C14.9497 20 13.2998 20 10 20H9C5.70017 20 4.05025 20 3.02513 18.9749C2 17.9497 2 16.2998 2 13V11Z" stroke="currentColor" stroke-width="1.5"/><path d="M17 8.90585L17.1259 8.80196C19.2417 7.05623 20.2996 6.18336 21.1498 6.60482C22 7.02628 22 8.42355 22 11.2181V12.7819C22 15.5765 22 16.9737 21.1498 17.3952C20.2996 17.8166 19.2417 16.9438 17.1259 15.198L17 15.0941" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><circle cx="11.5" cy="9.5" r="1.5" stroke="currentColor" stroke-width="1.5"/>',
+    cancel: '<path d="M18 6L6.00081 17.9992M17.9992 18L6 6.00085" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>',
   };
   function hi(name, size = 15) {
     const wrap = document.createElement("span");

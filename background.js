@@ -32,12 +32,31 @@ let state = {
   error: null,
   recorderHost: null, // "offscreen" | "panel" while recording
   imminentCall: null, // {title, meet_url, start} from the calendar, for the pill
+  panelOpen: false, // a NATIVE side panel is open somewhere (pill hides itself)
 };
 
 async function loadState() {
   const saved = (await chrome.storage.local.get("wn_recorder_state")).wn_recorder_state;
   if (saved) state = saved;
+  // Presence is live-only: after a SW restart no port is connected yet, so
+  // never resurrect a stale "open" flag (the panel re-connects immediately).
+  state.panelOpen = false;
 }
+
+// --- Panel presence -------------------------------------------------------
+// The side panel page holds a long-lived port while it exists; the Meet pill
+// hides whenever a NATIVE panel is open (the docked iframe is tracked by the
+// content script itself, which owns it and knows when it is visible).
+const panelPorts = new Set();
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "wn-panel-native") return;
+  panelPorts.add(port);
+  if (panelPorts.size === 1) setState({ panelOpen: true });
+  port.onDisconnect.addListener(() => {
+    panelPorts.delete(port);
+    if (panelPorts.size === 0) setState({ panelOpen: false });
+  });
+});
 async function setState(patch) {
   state = { ...state, ...patch };
   await chrome.storage.local.set({ wn_recorder_state: state });
