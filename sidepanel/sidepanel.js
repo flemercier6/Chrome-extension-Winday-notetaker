@@ -189,6 +189,23 @@ function setTab(tab) {
   $("tab-summary").classList.toggle("hidden", tab !== "summary");
 }
 
+// Merge consecutive turns from the SAME speaker into one paragraph bubble, so a
+// long stretch of speech reads as a block instead of a stack of tiny bubbles.
+// Interim (in-progress) turns stay on their own so they can keep updating.
+function coalesce(bubbles) {
+  const out = [];
+  for (const b of bubbles) {
+    const key = b.channel === 0 ? "You" : (b.speaker || "Participant");
+    const last = out[out.length - 1];
+    if (last && !last.interim && !b.interim && last._key === key) {
+      last.text += " " + b.text;
+    } else {
+      out.push({ ...b, _key: key });
+    }
+  }
+  return out;
+}
+
 function renderBubbles(bubbles, emptyText, autoscroll) {
   const box = $("transcript");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
@@ -196,7 +213,7 @@ function renderBubbles(bubbles, emptyText, autoscroll) {
   if (bubbles.length === 0) {
     const e = div("transcript-empty"); e.textContent = emptyText; box.append(e); return;
   }
-  for (const b of bubbles) {
+  for (const b of coalesce(bubbles)) {
     const el = div("utt " + (b.channel === 0 ? "you" : "them") + (b.interim ? " interim" : ""));
     const who = div("who"); who.textContent = b.channel === 0 ? "You" : (b.speaker || "Participant");
     const t = document.createElement("div"); t.textContent = b.text;
