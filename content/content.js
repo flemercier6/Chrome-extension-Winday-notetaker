@@ -187,6 +187,11 @@
     // out of the way once recording starts — the side panel owns the in-call UI.
     const phase = state.phase || "idle";
     const imm = state.imminentCall || null;
+    // Self-heal a double panel: if the NATIVE side panel is present while our
+    // docked overlay is also showing, the overlay is redundant — drop it.
+    if (state.panelOpen === true && panelHost && panelHost.style.display !== "none") {
+      panelHost.style.display = "none";
+    }
     if (phase !== "idle" || (!inCall && !imm)) { unmount(); return; }
     // While a panel is showing — the native side panel (anywhere) or this
     // page's docked iframe — the pill is redundant: stay away.
@@ -205,9 +210,12 @@
       const label = document.createElement("span");
       label.textContent = imm && imm.title ? imm.title : "Winday Meet";
       const rec = button("Record", "rec", async () => {
-        const r = await send("WN_RECORD_TAB");
+        await send("WN_RECORD_TAB"); // silent path, best-effort — the panel handles any fallback
         const p = await send("WN_OPEN_PANEL");
-        if (!p || p.mode === "docked" || p.ok === false || (r && !r.ok)) openPanel();
+        // The docked overlay is ONLY the fallback for browsers whose native
+        // side panel doesn't render (Arc). If the native panel opened, it owns
+        // the UI — opening the overlay too would show the panel twice.
+        if (!p || p.ok === false || p.mode === "docked") openPanel();
       }, "mic");
       b.append(label, rec);
     } else if (imm) {
