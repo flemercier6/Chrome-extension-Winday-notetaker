@@ -92,7 +92,7 @@ async function connectNotion() {
   btn.textContent = "Opening Notion…";
   try {
     const { url } = await sb.notionStart();
-    chrome.tabs.create({ url, active: true });
+    const authTab = await chrome.tabs.create({ url, active: true });
     $("notion-status-text").textContent = "Waiting for Notion authorization…";
     // Poll until the callback stores the connection (or the user gives up).
     clearInterval(pollTimer);
@@ -103,6 +103,14 @@ async function connectNotion() {
       if ((status && status.connected) || tries > 40) {
         clearInterval(pollTimer);
         btn.disabled = false;
+        if (status && status.connected) {
+          // Tidy up: close the Notion tab (now on our confirmation page) and
+          // bring Settings back to the front, showing "Connected".
+          if (authTab && authTab.id != null) chrome.tabs.remove(authTab.id).catch(() => {});
+          chrome.tabs.getCurrent().then((me) => {
+            if (me && me.id != null) chrome.tabs.update(me.id, { active: true }).catch(() => {});
+          }).catch(() => {});
+        }
       }
     }, 2500);
   } catch (e) {

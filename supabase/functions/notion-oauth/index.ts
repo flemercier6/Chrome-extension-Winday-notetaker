@@ -69,20 +69,39 @@ async function getUser(req: Request) {
 async function statusFor(userId: string) {
   const { data } = await admin
     .from("notion_connections")
-    .select("workspace_name, workspace_icon, database_id, database_url")
+    .select("access_token, workspace_name, workspace_icon, database_id, database_url")
     .eq("user_id", userId)
     .maybeSingle();
   if (!data) return { connected: false };
+
+  // Self-heal: rows written before the page→database resolution existed can
+  // hold a duplicated PAGE id (and no URL). Resolve to the real database once,
+  // here, so exports and "Open database" work without reconnecting.
+  let databaseId = data.database_id;
+  let databaseUrl = data.database_url;
+  if (databaseId && !databaseUrl) {
+    const resolved = await resolveDatabase(data.access_token, databaseId);
+    if (resolved.id) {
+      databaseId = resolved.id;
+      databaseUrl = resolved.url;
+      await admin.from("notion_connections")
+        .update({ database_id: databaseId, database_url: databaseUrl, updated_at: new Date().toISOString() })
+        .eq("user_id", userId);
+    }
+  }
+
   return {
     connected: true,
     workspace_name: data.workspace_name,
     workspace_icon: data.workspace_icon,
-    database_id: data.database_id,
-    database_url: data.database_url,
+    database_id: databaseId,
+    database_url: databaseUrl,
   };
 }
 
 async function handleStart(userId: string) {
+  // Hygiene: drop stale nonces so the table never accumulates.
+  await admin.from("notion_oauth_states").delete().lt("created_at", new Date(Date.now() - 3600e3).toISOString());
   // A random state nonce ties Notion's redirect back to this user.
   const state = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");
   await admin.from("notion_oauth_states").insert({ state, user_id: userId });
@@ -124,13 +143,17 @@ async function handleCallback(url: URL) {
   const accessToken: string = tok.access_token;
 
   // Figure out the target database:
-  //  - template flow: Notion returns duplicated_template_id (our template DB)
-  //  - otherwise: create "Winday Meeting Notes" under the first granted page
-  let databaseId: string | null = tok.duplicated_template_id ?? null;
+  //  - template flow: Notion returns duplicated_template_id. Careful: that id
+  //    can be the duplicated PAGE wrapping the database, not the database
+  //    itself — resolve it to the actual child database.
+  //  - otherwise: create "Winday Meeting Notes" under the first granted page.
+  let databaseId: string | null = null;
   let databaseUrl: string | null = null;
 
-  if (databaseId) {
-    databaseUrl = await fetchDatabaseUrl(accessToken, databaseId);
+  if (tok.duplicated_template_id) {
+    const resolved = await resolveDatabase(accessToken, tok.duplicated_template_id);
+    databaseId = resolved.id ?? tok.duplicated_template_id;
+    databaseUrl = resolved.url;
   } else {
     const made = await createDatabase(accessToken);
     databaseId = made.id;
@@ -151,8 +174,8 @@ async function handleCallback(url: URL) {
 
   return page(
     databaseId
-      ? "✅ Notion connected. Your meeting notes will be saved automatically. You can close this tab."
-      : "✅ Notion connected, but no database could be created — grant access to at least one page and reconnect.",
+      ? "Notion connected. Your meeting notes will be saved automatically. This tab will close by itself — or you can close it."
+      : "Notion connected, but no database could be created. Grant access to at least one page and reconnect.",
     true,
   );
 }
@@ -183,14 +206,26 @@ async function createDatabase(token: string): Promise<{ id: string | null; url: 
   return { id: db.id, url: db.url ?? null };
 }
 
-async function fetchDatabaseUrl(token: string, databaseId: string): Promise<string | null> {
+// Resolve an id that may be a database OR a duplicated page that CONTAINS the
+// database (Notion's duplicated_template_id is the copied page's id when the
+// template is a page) to the actual database id + url.
+async function resolveDatabase(token: string, id: string): Promise<{ id: string | null; url: string | null }> {
   try {
-    const r = await notion(token, "GET", `/v1/databases/${databaseId}`);
-    const d = await r.json();
-    return d.url ?? null;
-  } catch {
-    return null;
-  }
+    let r = await notion(token, "GET", `/v1/databases/${id}`);
+    if (r.ok) { const d = await r.json(); return { id: d.id, url: d.url ?? null }; }
+
+    r = await notion(token, "GET", `/v1/blocks/${id}/children?page_size=50`);
+    if (r.ok) {
+      const kids = (await r.json()).results ?? [];
+      const child = kids.find((b: any) => b.type === "child_database");
+      if (child) {
+        const dr = await notion(token, "GET", `/v1/databases/${child.id}`);
+        if (dr.ok) { const d = await dr.json(); return { id: d.id, url: d.url ?? null }; }
+        return { id: child.id, url: null };
+      }
+    }
+  } catch { /* fall through */ }
+  return { id: null, url: null };
 }
 
 function notion(token: string, method: string, path: string, body?: unknown) {
@@ -206,7 +241,10 @@ function notion(token: string, method: string, path: string, body?: unknown) {
 }
 
 function page(message: string, ok: boolean) {
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Winday · Notion</title>
+  // Pure-ASCII markup (entities for the emoji) + an explicit lowercase
+  // content-type built with Headers: whatever a relay does to header casing or
+  // charset guessing, this renders as a proper HTML page.
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Winday - Notion</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
@@ -215,8 +253,10 @@ function page(message: string, ok: boolean) {
   .em{font-size:34px}
   p{font-size:15px;line-height:1.5;margin:14px 0 0}
   @media (prefers-color-scheme: dark){body{background:#1B1A18;color:#F2F1EC}.card{background:#232220;border-color:#3A3835}}
-</style></head><body><div class="card"><div class="em">${ok ? "🎉" : "⚠️"}</div><p>${escapeHtml(message)}</p></div></body></html>`;
-  return new Response(html, { status: 200, headers: { ...cors, "Content-Type": "text/html; charset=utf-8" } });
+</style></head><body><div class="card"><div class="em">${ok ? "&#127881;" : "&#9888;&#65039;"}</div><p>${escapeHtml(message)}</p></div></body></html>`;
+  const headers = new Headers(cors);
+  headers.set("content-type", "text/html; charset=utf-8");
+  return new Response(html, { status: 200, headers });
 }
 
 function escapeHtml(s: unknown) {
