@@ -308,32 +308,69 @@ function summaryFailed(err, meetingId) {
   box.append(p);
 }
 
+// Summary layout: next steps FIRST (a to-do list — owner pill + checkbox, the
+// user's items on top, no AI priorities), then "Meeting context" bullets, then
+// the DYNAMIC topic sections. Older summaries (key_points + paragraph) render
+// through the same order with sensible fallbacks.
 function renderSummaryFor(m) {
   const box = $("summary"); box.innerHTML = "";
   const summary = m && m.summary;
   if (!summary) { const p = div("summary-pending"); p.append(text("Summary not available.")); box.append(p); return; }
 
   if (summary.headline) { const h = document.createElement("h2"); h.textContent = summary.headline; box.append(h); }
-  if (summary.summary) { const p = document.createElement("p"); p.textContent = summary.summary; box.append(p); }
-  if (summary.key_points && summary.key_points.length) {
-    const s = document.createElement("section");
-    const h = document.createElement("h3"); h.textContent = "Key points";
-    const ul = document.createElement("ul");
-    for (const kp of summary.key_points) { const li = document.createElement("li"); li.textContent = kp; ul.append(li); }
-    s.append(h, ul); box.append(s);
-  }
-  if (summary.next_steps && summary.next_steps.length) {
+
+  const sep = () => { const hr = document.createElement("div"); hr.className = "sep"; box.append(hr); };
+
+  // 1) Next steps — always first. User's items first even for old summaries.
+  const rawSteps = (summary.next_steps || []).filter((ns) => ns && ns.task);
+  const isUser = (ns) => ns.is_user === true || ns.owner === "You";
+  const steps = [...rawSteps.filter(isUser), ...rawSteps.filter((ns) => !isUser(ns))];
+  if (steps.length) {
     const s = document.createElement("section");
     const h = document.createElement("h3"); h.textContent = "Next steps";
-    const ul = document.createElement("ul");
-    for (const ns of summary.next_steps) {
-      const li = document.createElement("li"); li.className = "step";
-      const prio = span("prio " + (ns.priority || "low")); prio.textContent = ns.priority || "low";
-      const task = document.createElement("span"); task.className = "task";
-      task.textContent = ns.task + (ns.owner ? ` — ${ns.owner}` : "");
-      li.append(prio, task); ul.append(li);
+    const list = div("todo");
+    for (const ns of steps) {
+      const item = document.createElement("label");
+      item.className = "todo-item";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.addEventListener("change", () => item.classList.toggle("done", cb.checked));
+      const owner = span("owner-pill " + (isUser(ns) ? "user" : "other"));
+      owner.textContent = ns.owner || (isUser(ns) ? "You" : "Participant");
+      const task = span("todo-task"); task.textContent = ns.task;
+      item.append(cb, owner, task);
+      list.append(item);
     }
+    s.append(h, list); box.append(s);
+    sep();
+  }
+
+  // 2) Meeting context (old summaries: their key points).
+  const context = (summary.context && summary.context.length ? summary.context : summary.key_points) || [];
+  if (context.length) {
+    const s = document.createElement("section");
+    const h = document.createElement("h3"); h.textContent = "Meeting context";
+    const ul = document.createElement("ul");
+    for (const c of context) { const li = document.createElement("li"); li.textContent = c; ul.append(li); }
     s.append(h, ul); box.append(s);
+    sep();
+  }
+
+  // 3) Dynamic topic sections — whatever was actually discussed.
+  const sections = (summary.sections || []).filter((sec) => sec && sec.title && sec.bullets && sec.bullets.length);
+  for (const sec of sections) {
+    const s = document.createElement("section");
+    const h = document.createElement("h3"); h.textContent = sec.title;
+    const ul = document.createElement("ul");
+    for (const b of sec.bullets) { const li = document.createElement("li"); li.textContent = b; ul.append(li); }
+    s.append(h, ul); box.append(s);
+  }
+  // Old summaries have no sections — keep their paragraph so nothing is lost.
+  if (!sections.length && summary.summary) {
+    const s = document.createElement("section");
+    const h = document.createElement("h3"); h.textContent = "Summary";
+    const p = document.createElement("p"); p.textContent = summary.summary;
+    s.append(h, p); box.append(s);
   }
 
   const links = div("links");

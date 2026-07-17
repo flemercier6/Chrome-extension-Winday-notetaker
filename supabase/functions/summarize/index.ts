@@ -23,12 +23,15 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 
+// Summary shape: next steps (a to-do list — no AI-assigned priorities, the
+// user judges urgency), a short "meeting context" bullet list, then DYNAMIC
+// topic sections reflecting what was actually discussed. `summary` (plain
+// paragraph) is kept for the CRM's text column.
 const responseSchema = {
   type: "OBJECT",
   properties: {
     headline: { type: "STRING" },
     summary: { type: "STRING" },
-    key_points: { type: "ARRAY", items: { type: "STRING" } },
     next_steps: {
       type: "ARRAY",
       items: {
@@ -36,10 +39,21 @@ const responseSchema = {
         properties: {
           task: { type: "STRING" },
           owner: { type: "STRING" },
-          priority: { type: "STRING", enum: ["high", "medium", "low"] },
-          due: { type: "STRING" },
+          is_user: { type: "BOOLEAN" },
         },
-        required: ["task", "priority"],
+        required: ["task", "owner", "is_user"],
+      },
+    },
+    context: { type: "ARRAY", items: { type: "STRING" } },
+    sections: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          title: { type: "STRING" },
+          bullets: { type: "ARRAY", items: { type: "STRING" } },
+        },
+        required: ["title", "bullets"],
       },
     },
     // Identified speakers: which "Participant N" is which known participant.
@@ -56,7 +70,7 @@ const responseSchema = {
       },
     },
   },
-  required: ["headline", "summary", "key_points", "next_steps", "speaker_map"],
+  required: ["headline", "summary", "next_steps", "context", "sections", "speaker_map"],
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -104,6 +118,16 @@ Deno.serve(async (req) => {
 
     const labelled = utterances.map((u: any) => `${u.speaker}: ${u.text}`).join("\n");
 
+    // The user's first name — next steps are labelled with real names, never
+    // "You" (metadata first, else the email prefix, else the literal "You").
+    let userName = "You";
+    try {
+      const { data: u } = await admin.auth.admin.getUserById(user.id);
+      const meta = (u?.user as any)?.user_metadata ?? {};
+      userName = String(meta.first_name || meta.full_name || "").trim().split(/\s+/)[0] ||
+        (user.email ? user.email.split("@")[0].replace(/^\w/, (c: string) => c.toUpperCase()) : "You");
+    } catch { /* keep "You" */ }
+
     // Known participants (from enrich-meeting) → let the model identify who the
     // diarized "Participant N" voices actually are, from conversational cues.
     const participants: any[] = meeting.metadata?.participants ?? [];
@@ -118,28 +142,41 @@ Deno.serve(async (req) => {
         `invent names that are not in the list, and never map "You".`
       : `\n\nReturn an empty speaker_map.`;
 
-    // User-customizable instruction (Settings → Summary); structure and speaker
-    // identification stay enforced regardless of the custom text.
+    // Output structure — ALWAYS enforced, even with a custom user prompt.
+    const structureInstruction =
+      `\n\nOUTPUT STRUCTURE (mandatory):` +
+      `\n- next_steps: the meeting's action items as a to-do list. "task" is short and ` +
+      `imperative, WITHOUT the owner's name inside it. "owner" is the person's FIRST NAME: ` +
+      `use exactly "${userName}" for the user (the speaker labelled "You"); for others use ` +
+      `their first name from the known list or conversational cues, else their diarized ` +
+      `label (e.g. "Participant 2"). "is_user" is true only for the user's own items. ` +
+      `Order: ALL the user's items first, then the other participants'. Do NOT assign ` +
+      `priorities or due dates — the user judges urgency themselves.` +
+      `\n- context: 2–5 short bullets giving the meeting's context (who/why/goal/situation).` +
+      `\n- sections: the topics ACTUALLY discussed, one entry per major topic (0–6), each ` +
+      `with a specific title and 2–6 factual bullets (decisions, numbers, positions). Only ` +
+      `real topics — never pad with generic sections.` +
+      `\n- summary: a 2–3 sentence plain recap (for the CRM record).` +
+      `\n- Write everything in the same language as the transcript.`;
+
+    // User-customizable instruction (Settings → Summary) sets tone/role only.
     const defaultInstruction =
-      `You are an expert sales/meeting assistant for Winday CRM. Analyze the ` +
-      `following meeting transcript and produce structured notes. The speaker labelled ` +
-      `"You" is the app's user; "Participant 1/2/…" are the other attendees. Be concise ` +
-      `and action-oriented. For next_steps, infer the owner when possible (the user vs a ` +
-      `participant) and assign a realistic priority. Write in the same language as the ` +
-      `transcript.`;
+      `You are an expert sales/meeting assistant for Winday CRM. Analyze the following ` +
+      `meeting transcript and produce structured, action-oriented notes. The speaker ` +
+      `labelled "You" is the app's user; "Participant 1/2/…" are the other attendees. ` +
+      `Be concise and factual.`;
     const baseInstruction = (typeof custom_prompt === "string" && custom_prompt.trim())
       ? custom_prompt.trim()
       : defaultInstruction;
 
     const lengthInstruction = ({
-      short: `\n\nLength: SHORT — a 2–3 sentence summary, at most 3 key points, and only ` +
-             `the most critical next steps.`,
+      short: `\n\nLength: SHORT — only the most critical next steps, 2–3 context bullets, ` +
+             `at most 2 sections.`,
       medium: ``,
-      long: `\n\nLength: LONG — a detailed multi-paragraph summary covering context, ` +
-            `discussion and decisions, up to 10 key points, and exhaustive next steps.`,
+      long: `\n\nLength: LONG — exhaustive next steps and up to 6 detailed sections.`,
     } as Record<string, string>)[summary_length ?? "medium"] ?? "";
 
-    const prompt = `${baseInstruction}${lengthInstruction}${speakerInstruction}` +
+    const prompt = `${baseInstruction}${structureInstruction}${lengthInstruction}${speakerInstruction}` +
       `\n\nMeeting title: ${meeting.meeting_title}\n\nTRANSCRIPT:\n${labelled}`;
 
     const body = {
@@ -170,6 +207,19 @@ Deno.serve(async (req) => {
       const msg = `Gemini returned invalid JSON (finishReason: ${candidate?.finishReason ?? "?"})`;
       await failMeeting(msg);
       return json({ error: msg }, 502);
+    }
+
+    // Normalize next steps regardless of what the model returned: clean items
+    // only, the USER'S items first, and never any AI-assigned priority.
+    if (Array.isArray(summary.next_steps)) {
+      const steps = summary.next_steps
+        .filter((s: any) => s && s.task)
+        .map((s: any) => ({
+          task: String(s.task),
+          owner: String(s.owner ?? "").trim() || (s.is_user === true ? userName : "Participant"),
+          is_user: s.is_user === true,
+        }));
+      summary.next_steps = [...steps.filter((s: any) => s.is_user), ...steps.filter((s: any) => !s.is_user)];
     }
 
     // Apply confident speaker identifications to the transcript: relabel the

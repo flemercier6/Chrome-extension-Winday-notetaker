@@ -99,9 +99,9 @@ function postPage(token: string, body: unknown) {
 }
 
 function buildPage(databaseId: string, meeting: any, s: any, useDateMention: boolean) {
-  const emoji: Record<string, string> = { high: "🔴", medium: "🟡", low: "🟢" };
-  const order: Record<string, number> = { high: 0, medium: 1, low: 2 };
   const rt = (t: string) => [{ type: "text", text: { content: String(t).slice(0, 1990) } }];
+  const h3 = (t: string) => ({ object: "block", type: "heading_3", heading_3: { rich_text: rt(t) } });
+  const bullet = (t: string) => ({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: rt(t) } });
 
   // Notion page title = the event's name (as recorded), never the AI headline.
   const eventTitle = meeting.meeting_title || "Meeting";
@@ -124,30 +124,37 @@ function buildPage(databaseId: string, meeting: any, s: any, useDateMention: boo
       ]
     : rt(`${eventTitle} | ${dateLong} | ${timeStr}`);
 
-  // Body = the AI summary.
-  const children: any[] = [
-    { object: "block", type: "paragraph", paragraph: { rich_text: rt(s.summary ?? "") } },
-  ];
+  // Body mirrors the panel: next steps FIRST (to-dos, the user's items on
+  // top, no priorities), then context bullets, then the dynamic topic
+  // sections. Legacy summaries (key_points + paragraph) still render.
+  const children: any[] = [];
 
-  if (Array.isArray(s.key_points) && s.key_points.length) {
-    children.push({ object: "block", type: "heading_3", heading_3: { rich_text: rt("Key points") } });
-    for (const p of s.key_points) {
-      children.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: rt(p) } });
+  const rawSteps = (Array.isArray(s.next_steps) ? s.next_steps : []).filter((x: any) => x && x.task);
+  const isUser = (x: any) => x.is_user === true || x.owner === "You";
+  const steps = [...rawSteps.filter(isUser), ...rawSteps.filter((x: any) => !isUser(x))];
+  if (steps.length) {
+    children.push(h3("Next steps"));
+    for (const st of steps) {
+      const label = st.owner ? `${st.owner} — ${st.task}` : String(st.task);
+      children.push({ object: "block", type: "to_do", to_do: { rich_text: rt(label), checked: false } });
     }
   }
 
-  if (Array.isArray(s.next_steps) && s.next_steps.length) {
-    children.push({ object: "block", type: "heading_3", heading_3: { rich_text: rt("Next steps & priorities") } });
-    const steps = [...s.next_steps].sort((a, b) => (order[a.priority] ?? 9) - (order[b.priority] ?? 9));
-    for (const step of steps) {
-      const parts = [`${emoji[step.priority] ?? ""} ${step.task}`];
-      if (step.owner) parts.push(`— ${step.owner}`);
-      if (step.due) parts.push(`(${step.due})`);
-      children.push({
-        object: "block", type: "to_do",
-        to_do: { rich_text: rt(parts.join(" ")), checked: false },
-      });
-    }
+  const context: string[] = (Array.isArray(s.context) && s.context.length ? s.context : (s.key_points ?? []));
+  if (context.length) {
+    children.push(h3("Context"));
+    for (const c of context) children.push(bullet(c));
+  }
+
+  const sections = (Array.isArray(s.sections) ? s.sections : [])
+    .filter((x: any) => x && x.title && Array.isArray(x.bullets) && x.bullets.length);
+  for (const sec of sections) {
+    children.push(h3(String(sec.title)));
+    for (const b of sec.bullets) children.push(bullet(String(b)));
+  }
+  // Legacy shape: no sections — keep the paragraph so nothing is lost.
+  if (!sections.length && s.summary) {
+    children.push({ object: "block", type: "paragraph", paragraph: { rich_text: rt(s.summary) } });
   }
 
   return {

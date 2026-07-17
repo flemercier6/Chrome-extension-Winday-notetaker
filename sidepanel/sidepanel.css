@@ -202,12 +202,27 @@ button:disabled { opacity: 0.5; cursor: default; }
 .summary h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); margin: 0 0 7px; }
 .summary p { margin: 0; font-size: 14px; line-height: 20px; }
 .summary ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 18px; }
-.summary .step { display: flex; gap: 8px; align-items: baseline; }
-.summary .step .task { flex: 1; }
-.summary .prio { font-size: 10px; font-weight: 600; text-transform: uppercase; padding: 2px 7px; border-radius: var(--radius-full); flex: none; }
-.prio.high { background: var(--danger-subtle); color: var(--danger-on-subtle); }
-.prio.medium { background: var(--warning-subtle); color: var(--warning-on-subtle); }
-.prio.low { background: var(--neutral-subtle); color: var(--neutral-on-subtle); }
+/* The global `section { padding: 16px }` is for the page shells (signin/main);
+   inside the summary it silently shrank content 32px — the width mismatch. */
+.summary section { width: 100%; padding: 0; }
+.summary .sep { border-top: 1px solid var(--border-subtle); width: 100%; }
+
+/* Next steps as a full-width to-do list: checkbox + owner pill + task */
+.summary .todo { display: flex; flex-direction: column; gap: 7px; width: 100%; }
+.summary .todo-item { display: flex; align-items: flex-start; gap: 8px; width: 100%; cursor: pointer; }
+.summary .todo-item input[type="checkbox"] {
+  flex: none; width: 15px; height: 15px; margin: 1px 0 0;
+  accent-color: var(--brand-solid); cursor: pointer;
+}
+.summary .owner-pill {
+  flex: none; font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+  padding: 2px 8px; border-radius: var(--radius-full); margin-top: 0.5px;
+}
+.summary .owner-pill.user { background: var(--info-subtle); color: var(--info-on-subtle); }
+.summary .owner-pill.other { background: var(--neutral-subtle); color: var(--neutral-on-subtle); }
+.summary .todo-task { flex: 1; font-size: 13px; line-height: 18px; }
+.summary .todo-item.done .todo-task { text-decoration: line-through; color: var(--text-muted); }
+
 .summary .links { display: flex; gap: 8px; flex-wrap: wrap; }
 .summary-pending { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 13px; }
 
