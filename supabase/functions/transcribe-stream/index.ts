@@ -72,6 +72,7 @@ Deno.serve(async (req) => {
     deepgram.binaryType = "arraybuffer";
     deepgram.onopen = () => {
       dgReady = true;
+      console.log(`[dg] open lang=${dgParams.language} ch=${channels} user=${user.id}`);
       for (const m of pending) { try { deepgram!.send(m as ArrayBuffer); } catch (_) { /* noop */ } }
       pending.length = 0;
       // Deepgram closes an idle stream after ~10s; nudge it during silence.
@@ -81,8 +82,15 @@ Deno.serve(async (req) => {
     };
     // Forward Deepgram's JSON results straight through to the browser.
     deepgram.onmessage = (e) => { try { client.readyState === 1 && client.send(e.data); } catch (_) { /* noop */ } };
-    deepgram.onclose = closeBoth;
-    deepgram.onerror = closeBoth;
+    // Log WHY Deepgram dropped (close code + reason) so early stops are diagnosable.
+    deepgram.onclose = (ev: CloseEvent) => {
+      console.log(`[dg] close code=${ev.code} reason=${ev.reason || "(none)"} clean=${ev.wasClean}`);
+      closeBoth();
+    };
+    deepgram.onerror = (ev) => {
+      console.log(`[dg] error ${((ev as ErrorEvent)?.message) || "(unknown)"}`);
+      closeBoth();
+    };
   };
 
   client.onmessage = (e) => {
