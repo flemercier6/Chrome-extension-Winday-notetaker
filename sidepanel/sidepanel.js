@@ -95,7 +95,9 @@ function handleRecEvent(msg) {
     } else {
       interim[ch] = { speaker: msg.speaker, text: msg.text };
     }
-    if (!$("session-view").classList.contains("hidden") && activeTab === "transcript") renderTranscript();
+    // Redraw only when the live session's transcript pane is actually on screen
+    // (never while the user is viewing a PAST meeting — don't clobber it).
+    if (!viewingId && !$("session-view").classList.contains("hidden") && activeTab === "transcript") renderTranscript();
   } else if (msg.type === "WN_REC_LEVEL") {
     vizBars = msg.bars;
     renderViz();
@@ -168,16 +170,23 @@ function renderSession() {
   if (recording && activeTab === "summary") activeTab = "transcript";
   setTab(activeTab);
 
+  renderTranscript();
+
+  if (state.phase === "processing") summaryPending(span("spinner"), text(stageLabel(state.stage)));
+  else if (state.phase === "failed") summaryFailed(state.error, state.meetingId);
+  else renderSummaryFor(allMeetings().find((x) => x.id === state.meetingId) || null);
+}
+
+// Light redraw of the LIVE transcript bubbles only — this is the hot path, run
+// on every streaming event, so it skips the rest of the session view.
+function renderTranscript() {
+  const recording = state.phase === "recording";
   const bubbles = liveUtterances.slice();
   for (const ch of Object.keys(interim)) {
     const it = interim[ch];
     if (it && it.text) bubbles.push({ channel: Number(ch), speaker: it.speaker, text: it.text, interim: true });
   }
   renderBubbles(bubbles, recording ? "Listening… speech appears here as it's spoken." : "No transcript.", recording);
-
-  if (state.phase === "processing") summaryPending(span("spinner"), text(stageLabel(state.stage)));
-  else if (state.phase === "failed") summaryFailed(state.error, state.meetingId);
-  else renderSummaryFor(allMeetings().find((x) => x.id === state.meetingId) || null);
 }
 
 function renderViewing(m) {
@@ -604,12 +613,12 @@ $("btn-back").addEventListener("click", () => {
 
 paintIcons();
 
-// Tabs.
+// Tabs. Both panes are always kept rendered by renderSession/renderViewing;
+// switching tabs only toggles which one is visible.
 $("tab-btn-transcript").addEventListener("click", () => { setTab("transcript"); renderTranscript(); });
 $("tab-btn-summary").addEventListener("click", () => {
   if ($("tab-btn-summary").disabled) return;
   setTab("summary");
-  renderSummary();
 });
 
 refresh();

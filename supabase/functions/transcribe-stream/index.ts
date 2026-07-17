@@ -60,18 +60,32 @@ Deno.serve(async (req) => {
   let dgReady = false;
   const pending: (ArrayBuffer | string)[] = [];
   let keepAlive: number | undefined;
+  let clientPing: number | undefined;
+  let dgConnectTimeout: number | undefined;
 
   const closeBoth = () => {
     clearInterval(keepAlive);
+    clearInterval(clientPing);
+    clearTimeout(dgConnectTimeout);
     try { deepgram && deepgram.readyState <= 1 && deepgram.close(); } catch (_) { /* noop */ }
     try { client.readyState <= 1 && client.close(); } catch (_) { /* noop */ }
   };
 
   client.onopen = () => {
+    // Heartbeat so the extension can tell a healthy-but-quiet stream from a
+    // half-dead one (its watchdog reconnects after 15s of total silence).
+    clientPing = setInterval(() => {
+      try { client.readyState === 1 && client.send(JSON.stringify({ type: "wn-ping" })); } catch (_) { /* noop */ }
+    }, 5000);
+    // If Deepgram never finishes its handshake, give up so the client retries.
+    dgConnectTimeout = setTimeout(() => {
+      if (!dgReady) { console.log("[dg] connect timeout"); closeBoth(); }
+    }, 10000);
     deepgram = new WebSocket(dg.toString(), ["token", DEEPGRAM_API_KEY]);
     deepgram.binaryType = "arraybuffer";
     deepgram.onopen = () => {
       dgReady = true;
+      clearTimeout(dgConnectTimeout);
       console.log(`[dg] open lang=${dgParams.language} ch=${channels} user=${user.id}`);
       for (const m of pending) { try { deepgram!.send(m as ArrayBuffer); } catch (_) { /* noop */ } }
       pending.length = 0;
@@ -100,6 +114,8 @@ Deno.serve(async (req) => {
   };
   client.onclose = () => {
     clearInterval(keepAlive);
+    clearInterval(clientPing);
+    clearTimeout(dgConnectTimeout);
     // Tell Deepgram to flush the last words, then close.
     try {
       if (deepgram && deepgram.readyState === 1) {
