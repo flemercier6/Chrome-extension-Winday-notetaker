@@ -25,15 +25,15 @@
       <!-- Signed-in view -->
       <section id="main" class="hidden">
         <header>
-          <button id="btn-back" class="icon hidden" title="Back to recordings">‹ Recordings</button>
+          <button id="btn-back" class="icon iconed hidden" title="Back to recordings" data-icon="back" data-icon-size="16"><span>Recordings</span></button>
           <div class="header-right">
-            <button id="btn-settings" class="icon" title="Settings">⚙</button>
-            <button id="btn-signout" class="icon" title="Sign out">⎋</button>
+            <button id="btn-settings" class="icon" title="Settings" data-icon="settings" data-icon-size="19" aria-label="Settings"></button>
+            <button id="btn-signout" class="icon" title="Sign out" data-icon="signout" data-icon-size="19" aria-label="Sign out"></button>
           </div>
         </header>
 
         <div id="mic-banner" class="banner hidden">
-          <div>🎤 Microphone off — <a href="#" id="mic-link">enable it</a> to capture your voice.</div>
+          <div class="banner-row"><span class="banner-ico" data-icon="mic-off" data-icon-size="17"></span><span>Microphone off — <a href="#" id="mic-link">enable it</a> to capture your voice.</span></div>
           <div id="mic-banner-error" class="error small hidden" style="margin-top: 4px"></div>
         </div>
 

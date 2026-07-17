@@ -14,8 +14,17 @@ import * as sb from "../lib/supabase.js";
 import * as store from "../lib/store.js";
 import { createRecorder, acquireMic, requestMicPermission } from "../lib/capture.js";
 import { applyTheme } from "../lib/theme.js";
+import { icon } from "../lib/icons.js";
 
 const $ = (id) => document.getElementById(id);
+
+// Paint the static Hugeicons (header, banner) from their data-icon attribute.
+function paintIcons(root = document) {
+  for (const el of root.querySelectorAll("[data-icon]:not([data-icon-done])")) {
+    el.prepend(icon(el.dataset.icon, Number(el.dataset.iconSize) || 18));
+    el.setAttribute("data-icon-done", "");
+  }
+}
 
 // Apply the saved Theme choice as early as possible, then keep it in sync
 // whenever settings change (the service worker broadcasts WN_STATE on save).
@@ -229,7 +238,7 @@ function summaryPending(...nodes) {
 function summaryFailed(err, meetingId) {
   const box = $("summary"); box.innerHTML = "";
   const p = div("summary-pending");
-  const e = document.createElement("div"); e.className = "error"; e.textContent = "⚠︎ " + (err || "Processing failed");
+  const e = document.createElement("div"); e.className = "error"; e.append(icon("alert", 15), document.createTextNode(" " + (err || "Processing failed")));
   p.append(e);
   if (meetingId) p.append(btn("Retry", "linkbtn", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: meetingId })));
   box.append(p);
@@ -265,8 +274,8 @@ function renderSummaryFor(m) {
 
   const links = div("links");
   const notion = (m && m.notionPageURL) || state.notionURL || null;
-  if (notion) links.append(linkA("Open in Notion", notion)); // Notion only if exported
-  links.append(linkA("Open in CRM", crmURL(m || { id: state.meetingId })));
+  if (notion) links.append(linkA("Open in Notion", notion, "notion-open")); // Notion only if exported
+  links.append(linkA("Open in CRM", crmURL(m || { id: state.meetingId }), "crm-open"));
   box.append(links);
 }
 
@@ -282,8 +291,9 @@ function renderBottomBar() {
     const viz = div("viz"); viz.id = "viz";
     for (let i = 0; i < 24; i++) viz.append(div("bar"));
     const stop = btn("Stop", "stop-btn", () => chrome.runtime.sendMessage({ type: "WN_STOP" }));
-    const cancel = btn("✕", "ghost cancel-btn", () => chrome.runtime.sendMessage({ type: "WN_CANCEL" }));
-    cancel.title = "Discard";
+    stop.prepend(icon("stop", 16));
+    const cancel = iconBtn("cancel", "Discard", () => chrome.runtime.sendMessage({ type: "WN_CANCEL" }));
+    cancel.className = "ghost cancel-btn";
     row.append(viz, timeEl(), stop, cancel);
     bar.append(row);
     renderViz();
@@ -293,7 +303,9 @@ function renderBottomBar() {
     bar.append(s);
   } else {
     // idle / done / failed → start a (new) recording
-    bar.append(btn("🎙  Start Recording", "start", startRecording));
+    const start = btn("Start Recording", "start", startRecording);
+    start.prepend(icon("mic", 20));
+    bar.append(start);
   }
 }
 
@@ -309,10 +321,11 @@ function renderViz() {
   }
 }
 
-function linkA(label, url) {
+function linkA(label, url, iconName) {
   const a = document.createElement("a");
   a.className = "linkbtn";
-  a.textContent = label;
+  if (iconName) a.append(icon(iconName, 15));
+  a.append(document.createTextNode(label));
   a.href = url;
   a.target = "_blank";
   a.rel = "noreferrer";
@@ -363,13 +376,13 @@ function itemRow(m) {
   const actions = div("item-actions");
   if (!busy) {
     if (local && (m.status === "recorded" || m.status === "failed"))
-      actions.append(iconBtn("↻", "Transcribe & summarize", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: m.id })));
+      actions.append(iconBtn("retry", "Transcribe & summarize", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: m.id })));
     if (local && m.status === "ready" && !m.notionPageURL)
-      actions.append(iconBtn("➤", "Send to Notion", () => chrome.runtime.sendMessage({ type: "WN_EXPORT", id: m.id })));
-    if (m.notionPageURL) actions.append(iconLink("⧉", "Open in Notion", m.notionPageURL));
-    actions.append(iconLink("◫", "Open in CRM", crmURL(m)));
+      actions.append(iconBtn("notion-send", "Send to Notion", () => chrome.runtime.sendMessage({ type: "WN_EXPORT", id: m.id })));
+    if (m.notionPageURL) actions.append(iconLink("notion-open", "Open in Notion", m.notionPageURL));
+    actions.append(iconLink("crm-open", "Open in CRM", crmURL(m)));
     if (local) {
-      const del = iconBtn("🗑", "Delete", () => chrome.runtime.sendMessage({ type: "WN_DISCARD", id: m.id }));
+      const del = iconBtn("delete", "Delete", () => chrome.runtime.sendMessage({ type: "WN_DISCARD", id: m.id }));
       del.classList.add("del");
       actions.append(del);
     }
@@ -483,7 +496,11 @@ function recorderHint(msg, isError = true) {
   t.textContent = msg;
   s.append(t);
   bar.append(s);
-  if (isError) bar.append(btn("🎙  Start Recording", "start", startRecording));
+  if (isError) {
+    const start = btn("Start Recording", "start", startRecording);
+    start.prepend(icon("mic", 20));
+    bar.append(start);
+  }
 }
 
 // --- Helpers -------------------------------------------------------------
@@ -526,8 +543,8 @@ function div(cls) { const d = document.createElement("div"); d.className = cls; 
 function span(cls) { const s = document.createElement("span"); s.className = cls; return s; }
 function text(t) { const s = document.createElement("span"); s.textContent = t; return s; }
 function btn(label, cls, onClick) { const b = document.createElement("button"); b.textContent = label; b.className = cls; b.addEventListener("click", onClick); return b; }
-function iconBtn(label, title, onClick) { const b = document.createElement("button"); b.textContent = label; b.title = title; b.addEventListener("click", onClick); return b; }
-function iconLink(label, title, url) { const a = document.createElement("button"); a.textContent = label; a.title = title; a.addEventListener("click", () => chrome.tabs.create({ url })); return a; }
+function iconBtn(name, title, onClick) { const b = document.createElement("button"); b.append(icon(name, 16)); b.title = title; b.setAttribute("aria-label", title); b.addEventListener("click", onClick); return b; }
+function iconLink(name, title, url) { const a = document.createElement("button"); a.append(icon(name, 16)); a.title = title; a.setAttribute("aria-label", title); a.addEventListener("click", () => chrome.tabs.create({ url })); return a; }
 
 /** Opens Settings as a plain tab instead of chrome.runtime.openOptionsPage() —
  *  that API can silently no-op on some Chromium forks (no error, no tab), which
@@ -584,6 +601,8 @@ $("btn-back").addEventListener("click", () => {
   if (viewingId) { viewingId = null; render(); return; }
   chrome.runtime.sendMessage({ type: "WN_DISMISS" }).catch(() => {});
 });
+
+paintIcons();
 
 // Tabs.
 $("tab-btn-transcript").addEventListener("click", () => { setTab("transcript"); renderTranscript(); });

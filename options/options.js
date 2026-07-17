@@ -1,6 +1,7 @@
 import * as store from "../lib/store.js";
 import { requestMicPermission } from "../lib/capture.js";
 import { applyTheme } from "../lib/theme.js";
+import { icon } from "../lib/icons.js";
 
 const $ = (id) => document.getElementById(id);
 const fields = ["theme", "transcriptionLanguage", "panelMode", "notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
@@ -41,13 +42,15 @@ async function save() {
 let savedTimer = null;
 function flashSaved() {
   const el = $("saved");
-  el.textContent = "✓ Saved";
+  el.replaceChildren(icon("check", 14), document.createTextNode(" Saved"));
   clearTimeout(savedTimer);
   savedTimer = setTimeout(() => (el.textContent = "Settings are saved automatically."), 1200);
 }
 
 function updateMicStatus(granted) {
-  $("mic-status").textContent = granted ? "✓ Microphone allowed" : "Not allowed";
+  const el = $("mic-status");
+  if (granted) el.replaceChildren(icon("check", 14), document.createTextNode(" Microphone allowed"));
+  else el.textContent = "Not allowed";
   $("btn-mic").disabled = granted;
 }
 

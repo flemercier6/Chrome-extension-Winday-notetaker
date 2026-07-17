@@ -112,9 +112,11 @@
         button {
           border: 0; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 500;
           cursor: pointer; color: ${P.btnText}; background: ${P.btnBg};
+          display: inline-flex; align-items: center; gap: 6px;
         }
         button.ghost { background: transparent; color: ${P.secondary}; padding: 6px 8px; }
         button.stop { background: ${P.danger}; color: ${P.onDanger}; }
+        button svg { display: block; flex: none; }
         a { color: ${P.link}; text-decoration: none; font-weight: 500; }
         .muted { color: ${P.muted}; }
       </style>
@@ -163,11 +165,11 @@
       // carries the activeTab grant) and reveal the panel.
       const label = document.createElement("span");
       label.textContent = imm && imm.title ? imm.title : "Winday Meet";
-      const rec = button("● Record", "rec", async () => {
+      const rec = button("Record", "rec", async () => {
         const r = await send("WN_RECORD_TAB");
         const p = await send("WN_OPEN_PANEL");
         if (!p || p.mode === "docked" || p.ok === false || (r && !r.ok)) openPanel();
-      });
+      }, "mic");
       b.append(label, rec);
     } else if (imm) {
       // A scheduled call is imminent but we're not in it yet → jump to it.
@@ -176,14 +178,27 @@
       const join = button("Join", "rec", () => {
         if (imm.meet_url) location.href = imm.meet_url;
         else openPanel();
-      });
+      }, "join");
       b.append(label, join);
     }
   }
 
-  function button(text, cls, onClick) {
+  // Hugeicons (stroke, currentColor, 24 grid) — inlined since a content script
+  // can't import the shared lib/icons.js module.
+  const ICONS = {
+    mic: '<path d="M17 7V11C17 13.7614 14.7614 16 12 16C9.23858 16 7 13.7614 7 11V7C7 4.23858 9.23858 2 12 2C14.7614 2 17 4.23858 17 7Z" stroke="currentColor" stroke-width="1.5"/><path d="M17 7H14M17 11H14" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M20 11C20 15.4183 16.4183 19 12 19M12 19C7.58172 19 4 15.4183 4 11M12 19V22M12 22H15M12 22H9" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>',
+    join: '<path d="M2 11C2 7.70017 2 6.05025 3.02513 5.02513C4.05025 4 5.70017 4 9 4H10C13.2998 4 14.9497 4 15.9749 5.02513C17 6.05025 17 7.70017 17 11V13C17 16.2998 17 17.9497 15.9749 18.9749C14.9497 20 13.2998 20 10 20H9C5.70017 20 4.05025 20 3.02513 18.9749C2 17.9497 2 16.2998 2 13V11Z" stroke="currentColor" stroke-width="1.5"/><path d="M17 8.90585L17.1259 8.80196C19.2417 7.05623 20.2996 6.18336 21.1498 6.60482C22 7.02628 22 8.42355 22 11.2181V12.7819C22 15.5765 22 16.9737 21.1498 17.3952C20.2996 17.8166 19.2417 16.9438 17.1259 15.198L17 15.0941" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><circle cx="11.5" cy="9.5" r="1.5" stroke="currentColor" stroke-width="1.5"/>',
+  };
+  function hi(name, size = 15) {
+    const wrap = document.createElement("span");
+    wrap.innerHTML = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+    return wrap.firstElementChild;
+  }
+
+  function button(text, cls, onClick, iconName) {
     const el = document.createElement("button");
-    el.textContent = text;
+    if (iconName) el.append(hi(iconName));
+    el.append(document.createTextNode(text));
     if (cls) el.className = cls;
     el.addEventListener("click", onClick);
     return el;
