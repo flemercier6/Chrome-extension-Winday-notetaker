@@ -1,4 +1,5 @@
 import * as store from "../lib/store.js";
+import * as sb from "../lib/supabase.js";
 import { requestMicPermission } from "../lib/capture.js";
 import { applyTheme } from "../lib/theme.js";
 import { icon } from "../lib/icons.js";
@@ -19,6 +20,87 @@ async function load() {
   $("deepgramModel").value = s.deepgramModel;
   $("geminiModel").value = s.geminiModel;
   updateMicStatus(await store.getMicGranted());
+
+  // Notion connection needs the signed-in user's session.
+  const session = await store.getSession();
+  if (session) sb.useSession(session, (ns) => store.setSession(ns).catch(() => {}));
+  refreshNotion(session);
+}
+
+// --- Notion connection ---------------------------------------------------
+
+function renderNotion(status) {
+  const dot = $("notion-dot");
+  const text = $("notion-status-text");
+  const connectBtn = $("btn-notion-connect");
+  const disconnectBtn = $("btn-notion-disconnect");
+  const dbLink = $("notion-db-link");
+
+  const connected = !!(status && status.connected);
+  dot.classList.toggle("on", connected);
+  if (connected) {
+    const ws = status.workspace_name ? ` · ${status.workspace_name}` : "";
+    text.textContent = `Connected${ws}`;
+    connectBtn.textContent = "Reconnect";
+    disconnectBtn.hidden = false;
+    if (status.database_url) { dbLink.href = status.database_url; dbLink.hidden = false; }
+    else dbLink.hidden = true;
+  } else {
+    text.textContent = status && status.error ? "Sign in to Winday to connect Notion" : "Not connected";
+    connectBtn.textContent = "Connect Notion";
+    disconnectBtn.hidden = true;
+    dbLink.hidden = true;
+  }
+  // Cache for the recorder's auto-export gate (server stays source of truth).
+  store.setSettings({ notionConnected: connected }).catch(() => {});
+}
+
+async function refreshNotion(session) {
+  if (!session) { renderNotion({ connected: false, error: "no-session" }); return null; }
+  try {
+    const status = await sb.notionStatus();
+    renderNotion(status);
+    return status;
+  } catch (e) {
+    renderNotion({ connected: false, error: String(e) });
+    return null;
+  }
+}
+
+let pollTimer = null;
+async function connectNotion() {
+  const btn = $("btn-notion-connect");
+  const session = await store.getSession();
+  if (!session) { $("notion-status-text").textContent = "Sign in to Winday first (open the side panel)."; return; }
+  btn.disabled = true;
+  const prev = btn.textContent;
+  btn.textContent = "Opening Notion…";
+  try {
+    const { url } = await sb.notionStart();
+    chrome.tabs.create({ url, active: true });
+    $("notion-status-text").textContent = "Waiting for Notion authorization…";
+    // Poll until the callback stores the connection (or the user gives up).
+    clearInterval(pollTimer);
+    let tries = 0;
+    pollTimer = setInterval(async () => {
+      tries++;
+      const status = await refreshNotion(session).catch(() => null);
+      if ((status && status.connected) || tries > 40) {
+        clearInterval(pollTimer);
+        btn.disabled = false;
+      }
+    }, 2500);
+  } catch (e) {
+    $("notion-status-text").textContent = "Couldn't start Notion connection: " + (e?.message || e);
+    btn.textContent = prev;
+    btn.disabled = false;
+  }
+}
+
+async function disconnectNotion() {
+  clearInterval(pollTimer);
+  try { await sb.notionDisconnect(); } catch (_) {}
+  renderNotion({ connected: false });
 }
 
 async function save() {
@@ -74,5 +156,12 @@ $("btn-reset-prompt").addEventListener("click", async () => {
   await save();
 });
 $("btn-mic").addEventListener("click", requestMic);
+$("btn-notion-connect").addEventListener("click", connectNotion);
+$("btn-notion-disconnect").addEventListener("click", disconnectNotion);
+
+// Re-check the connection when returning to this tab (e.g. after authorizing).
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) store.getSession().then(refreshNotion);
+});
 
 load();

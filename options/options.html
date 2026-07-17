@@ -67,13 +67,29 @@
 
       <section class="card">
         <h2>Notion</h2>
-        <label>Notion database ID
-          <input id="notionDatabaseID" type="text" placeholder="e.g. 24f1a2b3c4d5..." />
-        </label>
+        <p class="muted small">Connect your Notion once. Winday creates a <b>“Winday Meeting Notes”</b> database in your workspace and sends every meeting note there automatically — no database ID to copy.</p>
+        <div class="conn" id="notion-conn">
+          <div class="conn-status">
+            <span class="conn-dot" id="notion-dot"></span>
+            <span id="notion-status-text">Checking connection…</span>
+          </div>
+          <div class="row">
+            <button id="btn-notion-connect" class="primary" type="button">Connect Notion</button>
+            <a id="notion-db-link" class="ghost small" target="_blank" rel="noreferrer" hidden>Open database</a>
+            <button id="btn-notion-disconnect" class="ghost small" type="button" hidden>Disconnect</button>
+          </div>
+        </div>
         <label class="check">
           <input id="autoExportToNotion" type="checkbox" />
           Automatically send notes to Notion after the summary
         </label>
+        <details class="advanced">
+          <summary>Advanced — paste a database ID instead of connecting</summary>
+          <label>Notion database ID
+            <input id="notionDatabaseID" type="text" placeholder="e.g. 24f1a2b3c4d5..." />
+          </label>
+          <p class="muted small">Only used if you haven’t connected Notion above. Requires the shared Winday integration to be invited to that database.</p>
+        </details>
       </section>
 
       <section class="card">

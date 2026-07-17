@@ -1,6 +1,7 @@
 /* Winday Meet options page — layout only. Design tokens and the light/dark
    palettes live in the shared ../theme.css, linked before this file. */
 * { box-sizing: border-box; }
+[hidden] { display: none !important; } /* beat display rules like a.ghost */
 body {
   margin: 0; background: var(--bg-page); color: var(--text-primary);
   font-family: var(--font); font-size: 14px; line-height: 20px;
@@ -44,3 +45,17 @@ button.ghost { background: transparent; color: var(--text-secondary); border: 1p
 button.ghost:hover { background: var(--bg-surface-hover); }
 .saved { text-align: center; font-size: 12px; color: var(--text-muted); }
 #saved .hi, #mic-status .hi { vertical-align: -3px; }
+
+/* Notion connection */
+.conn { margin-top: 14px; }
+.conn-status { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 12px; }
+.conn-dot { width: 9px; height: 9px; border-radius: 999px; background: var(--text-muted); flex: none; }
+.conn-dot.on { background: #3AA76D; }
+a.ghost { display: inline-flex; align-items: center; text-decoration: none;
+  background: transparent; color: var(--text-secondary); border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm); padding: 9px 14px; font-size: 14px; line-height: 18px; font-weight: 500; }
+a.ghost.small, button.ghost.small { padding: 7px 11px; font-size: 12px; line-height: 16px; }
+a.ghost:hover { background: var(--bg-surface-hover); }
+.advanced { margin-top: 16px; border-top: 1px solid var(--border-default); padding-top: 6px; }
+.advanced summary { cursor: pointer; font-size: 12px; color: var(--text-muted); padding: 6px 0; list-style: revert; }
+.advanced summary:hover { color: var(--text-secondary); }

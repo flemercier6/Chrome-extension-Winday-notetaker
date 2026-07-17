@@ -9,11 +9,15 @@
 //
 // Backend: reads the structured summary from the Winday CRM `meetings` table's
 // `metadata.summary` (jsonb) and records the resulting Notion URL back into
-// `metadata.notion_page_url`. The target database id is supplied per request by
-// the caller (a non-secret user preference), so no server-side settings table is
-// needed.
+// `metadata.notion_page_url`.
 //
-// The Notion integration token lives ONLY here, as the `NOTION_TOKEN` secret.
+// Token + target database are resolved per user:
+//   1. Preferred — the user's OAuth connection (public integration): the token
+//      and the auto-created "Winday Meeting Notes" database id come from the
+//      `notion_connections` row (see the notion-oauth function).
+//   2. Legacy fallback — the shared internal integration `NOTION_TOKEN` secret
+//      plus the database id the caller passes (a non-secret user preference).
+// Access tokens never leave the server.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const cors = {
@@ -33,8 +37,6 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
   try {
-    if (!NOTION_TOKEN) return json({ error: "NOTION_TOKEN secret is not set." }, 500);
-
     const authHeader = req.headers.get("Authorization") ?? "";
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
@@ -45,8 +47,18 @@ Deno.serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const { meeting_id, notion_database_id } = await req.json();
 
-    const databaseId = notion_database_id;
-    if (!databaseId) return json({ error: "No Notion database configured in Settings" }, 400);
+    // Resolve token + database: prefer the per-user OAuth connection, else the
+    // legacy shared token + the database id passed by the caller.
+    const { data: conn } = await admin
+      .from("notion_connections")
+      .select("access_token, database_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const token = conn?.access_token || NOTION_TOKEN;
+    const databaseId = conn?.database_id || notion_database_id;
+    if (!token) return json({ error: "Notion is not connected. Connect Notion in Settings." }, 400);
+    if (!databaseId) return json({ error: "No Notion database. Connect Notion in Settings." }, 400);
 
     const { data: meeting, error: mErr } = await admin
       .from("meetings").select("*").eq("id", meeting_id).eq("user_id", user.id).single();
@@ -56,9 +68,9 @@ Deno.serve(async (req) => {
     if (!summary) return json({ error: "Meeting has no summary to export" }, 400);
 
     // Try with a date-mention title; if Notion rejects it, retry with plain text.
-    let resp = await postPage(buildPage(databaseId, meeting, summary, true));
+    let resp = await postPage(token, buildPage(databaseId, meeting, summary, true));
     if (!resp.ok) {
-      resp = await postPage(buildPage(databaseId, meeting, summary, false));
+      resp = await postPage(token, buildPage(databaseId, meeting, summary, false));
     }
     if (!resp.ok) return json({ error: `Notion ${resp.status}: ${await resp.text()}` }, 502);
 
@@ -74,11 +86,11 @@ Deno.serve(async (req) => {
   }
 });
 
-function postPage(body: unknown) {
+function postPage(token: string, body: unknown) {
   return fetch("https://api.notion.com/v1/pages", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${NOTION_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       "Notion-Version": NOTION_VERSION,
       "Content-Type": "application/json",
     },
