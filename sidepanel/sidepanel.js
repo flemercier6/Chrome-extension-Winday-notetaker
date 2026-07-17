@@ -433,10 +433,18 @@ function itemRow(m) {
     main.addEventListener("click", () => { viewingId = m.id; activeTab = m.summary ? "summary" : "transcript"; render(); });
   }
 
-  const tag = document.createElement("span");
-  const t = statusTag(m.status);
-  tag.className = "tag " + t.cls;
-  tag.textContent = t.label;
+  // Success is the norm — no badge for it. Only failures are tagged (plus a
+  // transient "Processing…" while a retry is actively running).
+  let tag = null;
+  if (m.status === "failed") {
+    tag = document.createElement("span");
+    tag.className = "tag failed";
+    tag.textContent = "Failed";
+  } else if (busy) {
+    tag = document.createElement("span");
+    tag.className = "tag busy";
+    tag.textContent = "Processing…";
+  }
 
   const actions = div("item-actions");
   if (!busy) {
@@ -449,7 +457,9 @@ function itemRow(m) {
   }
   // Far right: ⋮ menu (Rename / Delete) — works for local AND synced meetings.
   actions.append(kebabMenu(row, m, { local, title }));
-  row.append(main, tag, actions);
+  row.append(main);
+  if (tag) row.append(tag);
+  row.append(actions);
   return row;
 }
 
@@ -655,15 +665,6 @@ function subtitle(m) {
     if (min > 0) parts.push(`${min} min`);
   }
   return parts.join("  ·  ");
-}
-function statusTag(status) {
-  switch (status) {
-    case "exported": return { cls: "exported", label: "In Notion" };
-    case "ready": return { cls: "ready", label: "Summary" };
-    case "failed": return { cls: "failed", label: "Failed" };
-    case "transcribing": case "summarizing": case "exporting": return { cls: "busy", label: "Processing…" };
-    default: return { cls: "recorded", label: "Not processed" };
-  }
 }
 function stageLabel(stage) {
   return { uploading: "Preparing…", transcribing: "Transcribing…", summarizing: "Summarizing…", exporting: "Saving notes…" }[stage] || "Processing…";

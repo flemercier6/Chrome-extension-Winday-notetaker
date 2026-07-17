@@ -161,10 +161,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 /* Tags — subtle fill + on-subtle text, radius/full, no border, no shadow */
 .tag { font-size: 12px; line-height: 16px; font-weight: 500; padding: 3px 8px; border-radius: var(--radius-full); flex: none; }
-.tag.ready, .tag.exported { background: var(--success-subtle); color: var(--success-on-subtle); }
 .tag.failed { background: var(--danger-subtle); color: var(--danger-on-subtle); }
 .tag.busy { background: var(--info-subtle); color: var(--info-on-subtle); }
-.tag.recorded { background: var(--neutral-subtle); color: var(--neutral-on-subtle); }
 .item-actions { display: flex; gap: 2px; flex: none; }
 .item-actions button { background: transparent; color: var(--text-secondary); padding: 4px 6px; font-size: 12px; }
 .item-actions button:hover { background: var(--bg-inset); }
