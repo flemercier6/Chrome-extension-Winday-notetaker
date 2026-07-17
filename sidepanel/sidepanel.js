@@ -397,6 +397,7 @@ function linkA(label, url, iconName) {
 }
 
 function renderList() {
+  closeMenu(); // a rebuilt list orphans any open row menu
   const list = $("list");
   list.innerHTML = "";
   const items = allMeetings().filter((m) => m.status !== "recording");
@@ -445,14 +446,90 @@ function itemRow(m) {
       actions.append(iconBtn("notion-send", "Send to Notion", () => chrome.runtime.sendMessage({ type: "WN_EXPORT", id: m.id })));
     if (m.notionPageURL) actions.append(iconLink("notion-open", "Open in Notion", m.notionPageURL));
     actions.append(iconLink("crm-open", "Open in CRM", crmURL(m)));
-    if (local) {
-      const del = iconBtn("delete", "Delete", () => chrome.runtime.sendMessage({ type: "WN_DISCARD", id: m.id }));
-      del.classList.add("del");
-      actions.append(del);
-    }
   }
+  // Far right: ⋮ menu (Rename / Delete) — works for local AND synced meetings.
+  actions.append(kebabMenu(row, m, { local, title }));
   row.append(main, tag, actions);
   return row;
+}
+
+// The per-row "more" menu. Only one menu is open at a time; any outside click
+// or Escape closes it.
+let openMenu = null;
+function closeMenu() {
+  if (openMenu) { openMenu.remove(); openMenu = null; }
+}
+document.addEventListener("click", (e) => {
+  if (openMenu && !openMenu.contains(e.target) && !openMenu._btn.contains(e.target)) closeMenu();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+
+function kebabMenu(row, m, { local, title }) {
+  const btn = iconBtn("more", "More", (e) => {
+    e.stopPropagation();
+    const wasOurs = openMenu && openMenu._btn === btn;
+    closeMenu();
+    if (wasOurs) return; // second click toggles off
+
+    const menu = div("row-menu");
+    menu._btn = btn;
+
+    const rename = document.createElement("button");
+    rename.textContent = "Rename";
+    rename.addEventListener("click", (ev) => { ev.stopPropagation(); closeMenu(); startRename(m, title); });
+
+    const del = document.createElement("button");
+    del.className = "danger";
+    del.textContent = "Delete";
+    del.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      closeMenu();
+      row.style.opacity = "0.45";
+      if (local) chrome.runtime.sendMessage({ type: "WN_DISCARD", id: m.id }).catch(() => {});
+      try { await sb.deleteMeeting(m.id); } catch (_) { /* local-only or offline */ }
+      remoteMeetings = remoteMeetings.filter((x) => x.id !== m.id);
+      render();
+    });
+
+    menu.append(rename, del);
+    row.append(menu);
+    openMenu = menu;
+  });
+  btn.classList.add("kebab");
+  return btn;
+}
+
+// Inline rename: the row's title becomes an input; Enter/blur saves, Esc cancels.
+function startRename(m, titleEl) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "rename-input";
+  input.value = m.title || "";
+  let done = false;
+  const finish = async (save) => {
+    if (done) return; done = true;
+    const next = input.value.trim();
+    input.replaceWith(titleEl);
+    if (!save || !next || next === m.title) return;
+    titleEl.textContent = next;
+    m.title = next;
+    // Local cache (if present) + the durable Supabase row, best effort.
+    if (meetings.some((x) => x.id === m.id)) {
+      chrome.runtime.sendMessage({ type: "WN_MEETING_UPSERT", meeting: { ...m, title: next } }).catch(() => {});
+    }
+    try { await sb.renameMeeting(m.id, next); } catch (_) { /* offline / local-only */ }
+    const remote = remoteMeetings.find((x) => x.id === m.id);
+    if (remote) remote.title = next;
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+    e.stopPropagation();
+  });
+  input.addEventListener("blur", () => finish(true));
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
 }
 
 // --- Actions -------------------------------------------------------------
