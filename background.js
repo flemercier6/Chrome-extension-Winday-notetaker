@@ -269,6 +269,17 @@ async function handle(msg, sender) {
       if (msg.session) await store.setSession(msg.session);
       return { ok: true };
 
+    // A context hit a REVOKED refresh token: the session is dead everywhere.
+    // Clear it once so every surface flips to the Log In screen (and every
+    // timer stops hammering the auth endpoint) instead of erroring forever.
+    case "WN_SESSION_DEAD":
+      if (await store.getSession()) {
+        await store.setSession(null);
+        sb.signOut();
+        broadcast();
+      }
+      return { ok: true };
+
     case "WN_SETTINGS_CHANGED":
       await refreshPanelMode();
       broadcast();
@@ -465,7 +476,16 @@ async function refreshUpcoming() {
       const m = (r && r.meetings && r.meetings[0]) || null;
       if (m) imminent = { title: m.title || "Meeting", meet_url: m.meet_url || null, start: m.start || null };
     }
-  } catch (_) { /* calendar not connected / offline — no prompt */ }
+  } catch (e) {
+    // Dead session discovered by the SW itself (it can't receive its own
+    // runtime message): sign the extension out cleanly.
+    if (sb.isSessionDead(e)) {
+      await store.setSession(null);
+      sb.signOut();
+      broadcast();
+    }
+    /* otherwise: calendar not connected / offline — no prompt */
+  }
   if (JSON.stringify(imminent) !== JSON.stringify(state.imminentCall || null)) {
     await setState({ imminentCall: imminent });
   }
