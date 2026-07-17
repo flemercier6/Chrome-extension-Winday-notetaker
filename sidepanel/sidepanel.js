@@ -62,6 +62,56 @@ function allMeetings() {
   return [...byId.values()].sort((a, b) => new Date(b.startedAt || 0) - new Date(a.startedAt || 0));
 }
 
+// Today's still-to-come calendar calls (with a Meet link), shown as their own
+// section above the recordings so the user can see what's ahead. Source: the
+// upcoming-meetings function, asked for a window that ends at LOCAL midnight —
+// so strictly today, never tomorrow.
+let upcoming = [];
+
+async function syncUpcoming() {
+  if (!session) { upcoming = []; paintUpcoming(); return; }
+  try {
+    const eod = new Date();
+    eod.setHours(23, 59, 59, 999);
+    const minutesLeftToday = Math.max(1, Math.ceil((eod.getTime() - Date.now()) / 60000));
+    const r = await sb.fetchUpcomingMeetings(minutesLeftToday);
+    upcoming = ((r && r.meetings) || [])
+      .filter((m) => m.start)
+      .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+  } catch (_) { upcoming = []; /* calendar not connected / offline */ }
+  paintUpcoming();
+}
+
+function paintUpcoming() {
+  const box = $("upcoming");
+  if (!box) return;
+  $("upcoming-section").classList.toggle("hidden", upcoming.length === 0);
+  box.innerHTML = "";
+  for (const m of upcoming) box.append(upcomingRow(m));
+}
+
+function upcomingRow(m) {
+  const row = div("item upcoming");
+  const start = new Date(m.start);
+  const started = Date.now() >= start.getTime();
+
+  const chip = div("up-time" + (started ? " now" : ""));
+  chip.textContent = started ? "Now" : start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  const main = document.createElement("div");
+  main.style.flex = "1";
+  main.style.overflow = "hidden";
+  const title = div("title"); title.textContent = m.title || "Meeting";
+  const sub = div("sub"); sub.textContent = m.company_name || "Scheduled call";
+  main.append(title, sub);
+
+  const actions = div("item-actions");
+  if (m.meet_url) actions.append(iconBtn("join", "Open the call", () => chrome.tabs.create({ url: m.meet_url })));
+
+  row.append(chip, main, actions);
+  return row;
+}
+
 // Live session state (during + right after a recording).
 let liveUtterances = [];      // committed finals: { channel, speaker, text }
 let interim = {};             // in-progress text per channel: { 0:{speaker,text}, 1:{…} }
@@ -84,6 +134,7 @@ async function refresh() {
   }
   render();
   syncRemoteMeetings(); // pull durable history (re-renders when it lands)
+  syncUpcoming(); // today's calendar calls (paints its own section)
 }
 
 // Live transcript + visualizer events. They reach an open panel over runtime
@@ -127,7 +178,7 @@ chrome.runtime.onMessage.addListener((msg) => {
       session = sess;
       render();
       // Refresh the durable list when signing in, or after a call is saved.
-      if (session && (!hadSession || state.phase === "done")) syncRemoteMeetings();
+      if (session && (!hadSession || state.phase === "done")) { syncRemoteMeetings(); syncUpcoming(); }
     });
     syncTheme(); // a settings change (e.g. Theme) also arrives as WN_STATE
   }
@@ -626,3 +677,7 @@ $("tab-btn-summary").addEventListener("click", () => {
 });
 
 refresh();
+
+// Keep the "Today" section honest while the panel stays open: passed calls
+// drop off and the "Now" chip appears as start times arrive.
+setInterval(syncUpcoming, 60_000);

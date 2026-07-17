@@ -107,6 +107,19 @@ button:disabled { opacity: 0.5; cursor: default; }
 .time { font-variant-numeric: tabular-nums; font-weight: 500; font-size: 20px; line-height: 24px; letter-spacing: -0.2px; }
 .hint { color: var(--text-muted); font-size: 12px; line-height: 16px; }
 
+/* Upcoming today — calendar calls still ahead, a section apart from the
+   recordings: dashed outline + a start-time chip instead of a status tag. */
+#upcoming-section { flex: none; display: flex; flex-direction: column; gap: 8px; }
+#upcoming { flex: none; max-height: 172px; overflow-y: auto; }
+.item.upcoming { border-style: dashed; background: transparent; }
+.item.upcoming:hover { background: var(--bg-surface-hover); }
+.up-time {
+  flex: none; min-width: 48px; text-align: center; padding: 6px 5px;
+  font-size: 12px; line-height: 16px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: var(--text-secondary); background: var(--bg-inset); border-radius: var(--radius-sm);
+}
+.up-time.now { color: var(--text-brand); }
+
 /* Recordings list */
 .section-title { font-weight: 500; font-size: 12px; line-height: 16px; color: var(--text-secondary); margin-top: 2px; }
 .list {
