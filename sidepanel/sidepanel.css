@@ -80,6 +80,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 /* Hugeicons — one library, one style: stroke, currentColor, 24 grid. Every
    icon inherits its button's colour (and the theme) via currentColor. */
 .hi { display: block; flex: none; }
+.hi.logo { border-radius: 4px; object-fit: contain; }
 #btn-back { font-weight: 500; font-size: 13px; }
 .banner-row { display: flex; align-items: flex-start; gap: 8px; }
 .banner-ico { flex: none; margin-top: 1px; }
