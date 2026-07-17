@@ -23,7 +23,7 @@ async function load() {
 
   // Notion connection needs the signed-in user's session.
   const session = await store.getSession();
-  if (session) sb.useSession(session, (ns) => store.setSession(ns).catch(() => {}));
+  if (session) sb.useSession(session, (ns) => store.setSession(ns).catch(() => {}), () => store.getSession());
   refreshNotion(session);
 }
 

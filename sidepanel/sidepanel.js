@@ -44,7 +44,11 @@ let timer = null;
 // cache (local wins per id — it carries the freshest status mid-pipeline).
 async function syncRemoteMeetings() {
   if (!session) return;
-  sb.useSession(session, (s) => chrome.runtime.sendMessage({ type: "WN_SESSION_REFRESHED", session: s }).catch(() => {}));
+  sb.useSession(
+    session,
+    (s) => chrome.runtime.sendMessage({ type: "WN_SESSION_REFRESHED", session: s }).catch(() => {}),
+    () => store.getSession(),
+  );
   try {
     remoteMeetings = await sb.listMeetings(50);
     render();

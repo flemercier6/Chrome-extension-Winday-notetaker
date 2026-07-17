@@ -133,7 +133,19 @@ async function handle(msg, sender) {
     case "WN_WEB_SESSION": {
       const s = msg.session;
       if (!s || !s.accessToken || !s.refreshToken) return { ok: false, error: "Invalid session." };
-      await store.setSession(s);
+      // The bridged session belongs to the CRM web app, which keeps rotating
+      // its refresh token — a shared copy soon dies with "Invalid Refresh
+      // Token: Already Used" (faster still across several devices). Exchange
+      // it right away for THIS device's own session (its own token family);
+      // fall back to the shared copy only if the exchange fails.
+      let own = null;
+      try {
+        sb.useSession(s, null);
+        own = await sb.exchangeForOwnSession();
+      } catch (_) { /* offline / function unavailable — shared copy still works */ }
+      const final = own || s;
+      sb.useSession(final, (ns) => store.setSession(ns).catch(() => {}), () => store.getSession());
+      await store.setSession(final);
       broadcast();
       // Close the sign-in tab we opened (best-effort).
       if (authTabId != null) {
@@ -142,6 +154,10 @@ async function handle(msg, sender) {
       }
       return { ok: true };
     }
+
+    // Latest persisted session, for contexts without chrome.storage (offscreen).
+    case "WN_GET_SESSION":
+      return { ok: true, session: await store.getSession() };
 
     case "WN_RECORD_TAB": {
       // Try the SILENT path: mint a tabCapture stream id here and record in
@@ -444,7 +460,7 @@ async function refreshUpcoming() {
   try {
     const session = await store.getSession();
     if (session) {
-      sb.useSession(session, (s) => store.setSession(s));
+      sb.useSession(session, (s) => store.setSession(s), () => store.getSession());
       const r = await sb.fetchUpcomingMeetings(2); // starts within 2 min or ongoing
       const m = (r && r.meetings && r.meetings[0]) || null;
       if (m) imminent = { title: m.title || "Meeting", meet_url: m.meet_url || null, start: m.start || null };
