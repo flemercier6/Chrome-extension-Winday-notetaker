@@ -207,16 +207,23 @@ button:disabled { opacity: 0.5; cursor: default; }
 .summary section { width: 100%; padding: 0; }
 .summary .sep { border-top: 1px solid var(--border-subtle); width: 100%; }
 
-/* Next steps as a full-width to-do list: checkbox + owner pill + task */
-.summary .todo { display: flex; flex-direction: column; gap: 7px; width: 100%; }
-.summary .todo-item { display: flex; align-items: flex-start; gap: 8px; width: 100%; cursor: pointer; }
+/* Next steps as a full-width to-do list: checkbox + owner pill + task.
+   A GRID with a max-content pill column keeps every task text aligned at the
+   same x even though pills have different natural widths. */
+.summary .todo {
+  display: grid; grid-template-columns: auto max-content 1fr;
+  column-gap: 8px; row-gap: 7px; align-items: start; width: 100%;
+}
+.summary .todo-item { display: contents; }
+.summary .todo-item > * { cursor: pointer; }
 .summary .todo-item input[type="checkbox"] {
-  flex: none; width: 15px; height: 15px; margin: 1px 0 0;
-  accent-color: var(--brand-solid); cursor: pointer;
+  width: 15px; height: 15px; margin: 1px 0 0;
+  accent-color: var(--brand-solid);
 }
 .summary .owner-pill {
-  flex: none; font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+  justify-self: start; font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
   padding: 2px 8px; border-radius: var(--radius-full); margin-top: 0.5px;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .summary .owner-pill.user { background: var(--info-subtle); color: var(--info-on-subtle); }
 .summary .owner-pill.other { background: var(--neutral-subtle); color: var(--neutral-on-subtle); }
