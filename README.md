@@ -1,10 +1,11 @@
 # Winday Meet — Chrome Extension
 
 A **Chrome extension (Manifest V3)** that records your **Google Meet** calls,
-transcribes them with **Deepgram (Nova‑3)**, summarizes them with **Gemini
-(Flash)**, and pushes the summary, next steps and priorities to the **Winday
-CRM** and **Notion** — all through the same secure **Supabase** backend as the
-macOS [Winday Notetaker](https://github.com/flemercier6/winday-notetaker), so no
+transcribes them with **Gladia** or **Deepgram (Nova‑3)** (Settings →
+*Transcription engine*), summarizes them with **Gemini (Flash)**, and pushes the
+summary, next steps and priorities to the **Winday CRM** and **Notion** — all
+through the same secure **Supabase** backend as the macOS
+[Winday Notetaker](https://github.com/flemercier6/winday-notetaker), so no
 API secret ever lives in the browser.
 
 This is a browser‑native port of the macOS app. It shares the account, the
@@ -39,16 +40,20 @@ one shows up in the same place.
 2. **Upload** — the recording is uploaded to the private Supabase `recordings`
    bucket and a `meetings` row is created (Row‑Level Security: you only ever see
    your own).
-3. **Transcribe / Summarize / Export** — the extension invokes the same Edge
-   Functions the macOS app uses, by meeting id. They call Deepgram
-   (`multichannel=true`, so **channel 0 = "You"**, **channel 1 = the others**),
-   Gemini and Notion **using secrets stored server‑side**, then write the
-   results back to the meeting row.
+3. **Transcribe / Summarize / Export** — the extension invokes the Edge
+   Functions by meeting id. Transcription goes to the engine chosen in
+   Settings: **Gladia** (`transcribe-gladia` — async pre‑recorded API with
+   diarization + auto language detection; the saved transcript is always this
+   batch pass, the live captions are display‑only) or **Deepgram**
+   (`transcribe` / `transcribe-stream`, multichannel — the same functions the
+   macOS app uses). Either way **channel 0 = "You"**, **channel 1 = the
+   others**. Gemini and Notion run next, all **using secrets stored
+   server‑side**, then the results are written back to the meeting row.
 
-The third‑party keys (Deepgram, Gemini, Notion) are **never shipped to the
-extension** — they live only as Supabase Edge Function secrets. The extension
-only carries the **publishable** Supabase URL + anon key (safe to distribute;
-access is gated by Supabase Auth + RLS).
+The third‑party keys (Gladia, Deepgram, Gemini, Notion) are **never shipped to
+the extension** — they live only as Supabase Edge Function secrets. The
+extension only carries the **publishable** Supabase URL + anon key (safe to
+distribute; access is gated by Supabase Auth + RLS).
 
 ---
 
@@ -127,8 +132,18 @@ The `supabase/` folder mirrors the shared backend for reference. **These
 functions are already deployed** to the Winday CRM's Supabase project
 (`gagfovgnuttmngnhqzwd`) and are used as‑is by both the macOS app and this
 extension — you do **not** need to redeploy anything to use the extension. The
-required secrets (`DEEPGRAM_API_KEY`, `GEMINI_API_KEY`, `NOTION_TOKEN`) already
-live there as Edge Function secrets.
+required secrets (`GLADIA_API_KEY`, `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`,
+`NOTION_TOKEN`) live there as Edge Function secrets — set them in the dashboard
+under *Project Settings → Edge Functions → Secrets*.
+
+The Gladia path adds two functions, deployed alongside the Deepgram ones (which
+are untouched, so the macOS app keeps working unchanged):
+
+- `transcribe-gladia` — batch transcription (Gladia v2 pre‑recorded, async
+  init + poll), diarization + auto language detection with code‑switching.
+- `transcribe-stream-gladia` — live relay (Gladia v2 live), deployed with
+  `verify_jwt=false` like `transcribe-stream` (the user JWT is validated inside
+  the function — browsers can't set headers on a WebSocket).
 
 ## Project layout
 

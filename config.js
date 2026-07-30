@@ -1,9 +1,9 @@
 // Build-time configuration for the Winday Meet Chrome extension.
 //
-// IMPORTANT: no third-party API secrets live here. Deepgram, Gemini and Notion
-// keys are stored server-side as Supabase Edge Function secrets (shared with the
-// macOS app and the Winday CRM). The extension only knows the Supabase URL +
-// publishable ("anon") key — both safe to ship, since access is gated by
+// IMPORTANT: no third-party API secrets live here. Gladia, Deepgram, Gemini and
+// Notion keys are stored server-side as Supabase Edge Function secrets (shared
+// with the macOS app and the Winday CRM). The extension only knows the Supabase
+// URL + publishable ("anon") key — both safe to ship, since access is gated by
 // Supabase Auth + Row-Level Security.
 //
 // This points at the SAME Supabase project as the macOS Winday Notetaker and the
@@ -14,6 +14,9 @@ export const CONFIG = {
   supabaseAnonKey: "sb_publishable_pkIHh7RHiAubkwA-De9RMg_g74nhbN_",
 
   // Non-secret model defaults (overridable in Options).
+  // Transcription engine: "gladia" (test) or "deepgram". Both live server-side
+  // as separate Edge Functions, so switching is instant and reversible.
+  transcriptionProvider: "gladia",
   deepgramModel: "nova-3",
   geminiModel: "gemini-2.5-flash",
 };

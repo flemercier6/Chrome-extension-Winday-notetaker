@@ -5,12 +5,13 @@ import { applyTheme } from "../lib/theme.js";
 import { icon } from "../lib/icons.js";
 
 const $ = (id) => document.getElementById(id);
-const fields = ["theme", "transcriptionLanguage", "panelMode", "notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
+const fields = ["theme", "transcriptionProvider", "transcriptionLanguage", "panelMode", "notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
 
 async function load() {
   const s = await store.getSettings();
   applyTheme(s.theme);
   $("theme").value = s.theme;
+  $("transcriptionProvider").value = s.transcriptionProvider === "deepgram" ? "deepgram" : "gladia";
   $("transcriptionLanguage").value = s.transcriptionLanguage || "multi";
   $("panelMode").value = s.panelMode === "docked" ? "docked" : "native";
   $("notionDatabaseID").value = s.notionDatabaseID;
@@ -130,6 +131,7 @@ async function disconnectNotion() {
 async function save() {
   const patch = {
     theme: $("theme").value,
+    transcriptionProvider: $("transcriptionProvider").value === "deepgram" ? "deepgram" : "gladia",
     transcriptionLanguage: $("transcriptionLanguage").value,
     panelMode: $("panelMode").value === "docked" ? "docked" : "native",
     notionDatabaseID: $("notionDatabaseID").value.trim(),

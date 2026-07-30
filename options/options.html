@@ -24,6 +24,13 @@
 
       <section class="card">
         <h2>Transcription</h2>
+        <label>Transcription engine
+          <select id="transcriptionProvider">
+            <option value="gladia">Gladia (test)</option>
+            <option value="deepgram">Deepgram (Nova-3)</option>
+          </select>
+        </label>
+        <p class="muted small">Gladia builds the saved transcript from the full recording after the call (better diarization and accuracy; the live captions during the call stay basic). Deepgram saves the live transcript directly.</p>
         <label>Spoken language
           <select id="transcriptionLanguage">
             <option value="multi">Multilingual (auto — detects &amp; switches)</option>
@@ -39,7 +46,7 @@
             <option value="ja">Japanese</option>
           </select>
         </label>
-        <p class="muted small">Nova-3 transcribes in the language spoken. "Multilingual" auto-detects and handles calls that switch between languages; pick a specific language for the best accuracy on single-language calls.</p>
+        <p class="muted small">"Multilingual" auto-detects the language and handles calls that switch between languages (both engines); pick a specific language for the best accuracy on single-language calls.</p>
       </section>
 
       <section class="card">

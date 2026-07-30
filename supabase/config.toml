@@ -3,6 +3,15 @@ project_id = "gagfovgnuttmngnhqzwd"
 [functions.transcribe]
 verify_jwt = true
 
+[functions.transcribe-gladia]
+verify_jwt = true
+
+# WebSocket relay: browsers can't set the Authorization header on a WS upgrade,
+# so the user JWT is validated inside the function (token query param) instead
+# of at the gateway — same as transcribe-stream.
+[functions.transcribe-stream-gladia]
+verify_jwt = false
+
 [functions.summarize]
 verify_jwt = true
 
