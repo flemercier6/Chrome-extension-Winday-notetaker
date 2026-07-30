@@ -7,9 +7,50 @@
 //
 // Retry / export of PAST meetings also run here (pure fetch work).
 import * as pipeline from "./lib/pipeline.js";
-import { createRecorder, acquireMic, configureSession, report } from "./lib/capture.js";
+import { createRecorder, acquireMic, configureSession, report, recoverFromJournal } from "./lib/capture.js";
 
 let recorder = null;
+
+// Liveness beacon for non-recording work (retry/export/recovery): while any of
+// it runs, hold a "wn-recorder" port so the service worker's crash-recovery
+// sweep knows a host is alive and doesn't fire a duplicate recovery.
+let working = 0;
+let workPort = null;
+function connectWorkPort() {
+  if (working <= 0 || workPort) return;
+  try {
+    workPort = chrome.runtime.connect({ name: "wn-recorder" });
+    workPort.onDisconnect.addListener(() => {
+      workPort = null;
+      if (working > 0) setTimeout(connectWorkPort, 500); // SW restarted
+    });
+  } catch (_) { /* extension context going away */ }
+}
+function holdWorkPort() { working++; connectWorkPort(); }
+function releaseWorkPort() {
+  working = Math.max(0, working - 1);
+  if (working === 0 && workPort) { try { workPort.disconnect(); } catch (_) {} workPort = null; }
+}
+async function withWorkPort(fn) {
+  holdWorkPort();
+  try { return await fn(); } finally { releaseWorkPort(); }
+}
+
+// A recovery already in flight must not be started twice (the boot sweep can
+// re-fire after a service-worker restart while we're still uploading).
+let recovering = false;
+async function recover({ session, settings }) {
+  if (recovering) return;
+  recovering = true;
+  try {
+    const did = await withWorkPort(() => recoverFromJournal(session, settings));
+    if (!did) {
+      report({ type: "WN_REC_FAILED", error: "The recording was interrupted before anything could be saved." });
+    }
+  } finally {
+    recovering = false;
+  }
+}
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.target !== "offscreen") return;
@@ -27,10 +68,13 @@ chrome.runtime.onMessage.addListener((msg) => {
       recorder?.stop(true);
       break;
     case "RETRY":
-      retryMeeting(msg).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
+      withWorkPort(() => retryMeeting(msg)).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
       break;
     case "EXPORT":
-      exportMeeting(msg).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
+      withWorkPort(() => exportMeeting(msg)).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
+      break;
+    case "RECOVER":
+      recover(msg).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
       break;
   }
 });

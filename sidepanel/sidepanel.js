@@ -12,7 +12,7 @@
 // in one click, and the shared recording engine (lib/capture.js) runs here.
 import * as sb from "../lib/supabase.js";
 import * as store from "../lib/store.js";
-import { createRecorder, acquireMic, requestMicPermission } from "../lib/capture.js";
+import { createRecorder, acquireMic, requestMicPermission, journalPeekUtterances } from "../lib/capture.js";
 import { applyTheme } from "../lib/theme.js";
 import { icon } from "../lib/icons.js";
 
@@ -137,6 +137,24 @@ async function refresh() {
   render();
   syncRemoteMeetings(); // pull durable history (re-renders when it lands)
   syncUpcoming(); // today's calendar calls (paints its own section)
+
+  // (Re)opened while a recording runs elsewhere (offscreen / another panel
+  // instance): this document wasn't there to accumulate the live finals, so
+  // seed them from the recorder's crash journal — the transcript picks up
+  // where the call actually is instead of starting blank.
+  if (state.phase === "recording" && liveUtterances.length === 0) {
+    journalPeekUtterances().then((utts) => {
+      if (state.phase !== "recording" || liveUtterances.length > 0 || !utts.length) return;
+      liveUtterances = utts.map((u) => ({
+        channel: u.speaker === "You" ? 0 : 1,
+        speaker: u.speaker,
+        text: u.text,
+      }));
+      if (!viewingId && !$("session-view").classList.contains("hidden") && activeTab === "transcript") {
+        renderTranscript();
+      }
+    }).catch(() => {});
+  }
 }
 
 // Live transcript + visualizer events. They reach an open panel over runtime

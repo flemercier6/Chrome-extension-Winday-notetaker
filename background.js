@@ -48,7 +48,23 @@ async function loadState() {
 // hides whenever a NATIVE panel is open (the docked iframe is tracked by the
 // content script itself, which owns it and knows when it is visible).
 const panelPorts = new Set();
+// Recorder-host liveness: whichever document is recording (offscreen, native
+// panel or docked iframe) — or running a pipeline — holds a "wn-recorder"
+// port. If every such port is gone while the state still says
+// recording/processing, the host died (panel closed, tab closed, restart):
+// the offscreen document then rebuilds the meeting from the crash journal
+// that lib/capture.js writes as it records, so the user still gets the
+// transcript + summary of everything captured up to that moment.
+const recorderPorts = new Set();
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === "wn-recorder") {
+    recorderPorts.add(port);
+    port.onDisconnect.addListener(() => {
+      recorderPorts.delete(port);
+      if (recorderPorts.size === 0) scheduleRecoveryCheck(2500);
+    });
+    return;
+  }
   if (port.name !== "wn-panel-native") return;
   panelPorts.add(port);
   if (panelPorts.size === 1) setState({ panelOpen: true });
@@ -57,6 +73,35 @@ chrome.runtime.onConnect.addListener((port) => {
     if (panelPorts.size === 0) setState({ panelOpen: false });
   });
 });
+
+let recoveryTimer = null;
+let recovering = false;
+// Give a live host a moment to (re)connect its port — a service-worker restart
+// also drops ports without anything actually dying.
+function scheduleRecoveryCheck(delayMs) {
+  if (!["recording", "processing"].includes(state.phase)) return;
+  clearTimeout(recoveryTimer);
+  recoveryTimer = setTimeout(() => { maybeRecover().catch(() => {}); }, delayMs);
+}
+
+async function maybeRecover() {
+  if (recovering) return;
+  if (!["recording", "processing"].includes(state.phase)) return;
+  if (recorderPorts.size > 0) return; // a host is alive — nothing to do
+  recovering = true;
+  try {
+    const session = await store.getSession();
+    if (!session) {
+      await setState({ phase: "failed", stage: null, error: "The recording was interrupted.", recorderHost: null });
+      return;
+    }
+    await setState({ phase: "processing", stage: "uploading", recorderHost: null });
+    await ensureOffscreen();
+    await sendToOffscreen({ type: "RECOVER", session, settings: await store.getSettings() });
+  } finally {
+    recovering = false;
+  }
+}
 async function setState(patch) {
   state = { ...state, ...patch };
   await chrome.storage.local.set({ wn_recorder_state: state });
@@ -104,8 +149,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // open its own iframe.
   if (msg?.type === "WN_OPEN_PANEL") {
     if (panelModeCache === "native" && chrome.sidePanel && sender?.tab) {
+      // WINDOW-scoped (not tab-scoped): a tab-scoped panel is destroyed the
+      // moment the user switches tabs, which used to kill a panel-hosted
+      // recording mid-call. The window-scoped panel survives tab switches.
       chrome.sidePanel
-        .open({ tabId: sender.tab.id })
+        .open(sender.tab.windowId != null ? { windowId: sender.tab.windowId } : { tabId: sender.tab.id })
         .then(() => sendResponse({ ok: true, mode: "native" }))
         .catch((e) => sendResponse({ ok: false, mode: "native", error: String(e?.message || e) }));
     } else {
@@ -209,8 +257,12 @@ async function handle(msg, sender) {
 
     case "WN_STOP":
       if (state.phase === "recording") {
-        if (state.recorderHost === "panel") chrome.runtime.sendMessage({ type: "WN_PANEL_STOP" }).catch(() => {});
-        else await sendToOffscreen({ type: "STOP" });
+        if (state.recorderHost === "panel") {
+          // The panel host may already be dead (closed mid-recording): recover
+          // from the journal instead of messaging into the void.
+          if (recorderPorts.size === 0) scheduleRecoveryCheck(1);
+          else chrome.runtime.sendMessage({ type: "WN_PANEL_STOP" }).catch(() => {});
+        } else await sendToOffscreen({ type: "STOP" });
       }
       return { ok: true };
 
@@ -419,9 +471,13 @@ async function refreshPanelMode() {
 // open the full-tab dashboard.
 chrome.action.onClicked.addListener((tab) => {
   // Open the panel synchronously — the native side panel needs this click's
-  // user-gesture token, which an await would drop.
+  // user-gesture token, which an await would drop. WINDOW-scoped so it
+  // survives tab switches (a recording may be hosted inside it).
   if (panelModeCache === "native" && chrome.sidePanel) {
-    chrome.sidePanel.open(tab && tab.id != null ? { tabId: tab.id } : {}).catch(() => {});
+    chrome.sidePanel.open(
+      tab && tab.windowId != null ? { windowId: tab.windowId }
+        : tab && tab.id != null ? { tabId: tab.id } : {},
+    ).catch(() => {});
   } else if (isMeetTab(tab)) {
     openPanelInTab(tab);
   } else {
@@ -453,8 +509,9 @@ chrome.contextMenus?.onClicked.addListener((info, tab) => {
   if (!isMeetTab(tab)) return;
   // Open the panel synchronously first: in native mode sidePanel.open() needs
   // the menu click's user-gesture token, which an `await` would drop.
+  // WINDOW-scoped: survives tab switches (see action.onClicked).
   if (panelModeCache === "native" && chrome.sidePanel) {
-    chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+    chrome.sidePanel.open(tab.windowId != null ? { windowId: tab.windowId } : { tabId: tab.id }).catch(() => {});
   } else {
     openPanelInTab(tab);
   }
@@ -512,7 +569,13 @@ async function refreshUpcoming() {
 chrome.alarms?.onAlarm.addListener((a) => { if (a.name === "wn-upcoming") refreshUpcoming(); });
 
 function boot() {
-  loadState();
+  loadState().then(() => {
+    // The state says a recording/pipeline is in flight. If its host doesn't
+    // announce itself within a few seconds (a healthy one reconnects its
+    // wn-recorder port right away), it died with the browser/extension —
+    // recover the journaled audio + transcript so the meeting isn't lost.
+    if (["recording", "processing"].includes(state.phase)) scheduleRecoveryCheck(5000);
+  });
   ensureMenus();
   refreshPanelMode();
   chrome.alarms?.create("wn-upcoming", { periodInMinutes: 1 });

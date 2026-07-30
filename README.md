@@ -104,10 +104,18 @@ Works in **Chrome**, **Dia** and **Arc**. The panel has two display modes
   where the extension was invoked (toolbar icon, right‑click menu item, `⌘⇧9` —
   opening the panel with one of those counts). Without that grant, the panel
   falls back to the share dialog and records inside its own iframe.
-- **Fallback recordings live in the Meet tab**: the panel's ✕ only *hides* the
-  iframe (recording continues), but closing the call's tab before "Notes
-  prêtes" aborts an in‑flight fallback recording/pipeline. The silent path
-  (offscreen document) survives tab closes.
+- **Fallback recordings live in the panel document** (docked iframe or native
+  side panel). The docked ✕ only *hides* the iframe (recording continues), and
+  the native side panel is opened **window‑scoped**, so switching tabs no
+  longer closes it. The silent path (offscreen document) survives tab closes
+  outright.
+- **Crash recovery**: while recording, the audio chunks + live transcript are
+  journaled to IndexedDB. If the recording host dies anyway (native panel
+  closed mid‑call, call tab closed during a fallback recording, browser or
+  extension restart), the capture stops there but nothing is lost: the
+  offscreen document detects it, uploads the journaled audio and runs the
+  full transcribe → summarize → export pipeline on everything captured up to
+  that moment.
 - **Microphone permission**: granted inline from the panel's banner (no
   navigation needed — `chrome.runtime.openOptionsPage()` used to be the only
   path and can silently no‑op on some Chromium forks, which left users stuck).
