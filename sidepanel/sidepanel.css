@@ -220,13 +220,37 @@ button:disabled { opacity: 0.5; cursor: default; }
   width: 15px; height: 15px; margin: 1px 0 0;
   accent-color: var(--brand-solid);
 }
-.summary .owner-pill {
-  justify-self: start; font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
-  padding: 2px 8px; border-radius: var(--radius-full); margin-top: 0.5px;
+.owner-pill {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+  padding: 2px 8px; border-radius: var(--radius-full);
   max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.summary .owner-pill.user { background: var(--info-subtle); color: var(--info-on-subtle); }
-.summary .owner-pill.other { background: var(--neutral-subtle); color: var(--neutral-on-subtle); }
+.owner-pill.user { background: var(--info-subtle); color: var(--info-on-subtle); }
+.owner-pill.other { background: var(--neutral-subtle); color: var(--neutral-on-subtle); }
+.summary .owner-pill { justify-self: start; margin-top: 0.5px; }
+/* Editable affordance: a subtle ring on hover (click reassigns the step). */
+.summary .owner-pill:hover { box-shadow: inset 0 0 0 1.5px currentColor; }
+
+/* Owner reassignment dropdown (opened from a pill, appended to <body>). */
+.owner-menu {
+  position: fixed; z-index: 60; min-width: 150px; max-width: 240px;
+  padding: 4px; display: flex; flex-direction: column; gap: 1px;
+  background: var(--bg-surface); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+}
+.owner-menu button {
+  display: flex; align-items: center; width: 100%; text-align: left; padding: 6px 8px;
+  border: 0; background: transparent; font: inherit;
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.owner-menu button:hover { background: var(--bg-surface-hover); }
+.owner-menu button.current { background: var(--bg-surface-hover); }
+.owner-menu input {
+  margin-top: 3px; font: inherit; font-size: 12px; line-height: 16px; padding: 5px 8px;
+  color: var(--text-primary); background: var(--bg-inset);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); outline: none;
+}
+.owner-menu input:focus { border-color: var(--border-focus); }
 .summary .todo-task { flex: 1; font-size: 13px; line-height: 18px; }
 .summary .todo-item.done .todo-task { text-decoration: line-through; color: var(--text-muted); }
 

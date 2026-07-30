@@ -337,6 +337,16 @@ function renderSummaryFor(m) {
       cb.addEventListener("change", () => item.classList.toggle("done", cb.checked));
       const owner = span("owner-pill " + (isUser(ns) ? "user" : "other"));
       owner.textContent = ns.owner || (isUser(ns) ? "You" : "Participant");
+      // The pill is editable: the summary sometimes assigns a step to the
+      // wrong person — click to reassign it to another participant.
+      if (m && m.id) {
+        owner.title = "Reassign to…";
+        owner.addEventListener("click", (e) => {
+          e.preventDefault();   // inside a <label>: don't toggle the checkbox
+          e.stopPropagation();
+          openOwnerMenu(owner, m, summary, ns);
+        });
+      }
       const task = span("todo-task"); task.textContent = ns.task;
       item.append(cb, owner, task);
       list.append(item);
@@ -378,6 +388,102 @@ function renderSummaryFor(m) {
   if (notion) links.append(linkA("Open in Notion", notion, "notion-open")); // Notion only if exported
   links.append(linkA("Open in CRM", crmURL(m || { id: state.meetingId }), "crm-open"));
   box.append(links);
+}
+
+// --- Owner pill editing ----------------------------------------------------
+// Reassign a next step to another participant when the summary got it wrong.
+
+// Candidate owners: the user (blue pill), then every other name we know of —
+// the other steps' owners, the transcript's identified speakers, and the
+// known attendees resolved by enrich-meeting.
+function ownerCandidates(m, summary) {
+  const steps = summary.next_steps || [];
+  const userStep = steps.find((s) => s.is_user === true && s.owner && s.owner !== "You");
+  const emailName = session && session.email
+    ? session.email.split("@")[0].replace(/^\w/, (c) => c.toUpperCase())
+    : null;
+  const user = (userStep && userStep.owner) || emailName || "You";
+
+  const seen = new Set([user.toLowerCase(), "you", "participant"]); // no generic placeholder
+  const others = [];
+  const add = (name) => {
+    const n = String(name || "").trim();
+    if (!n || seen.has(n.toLowerCase())) return;
+    seen.add(n.toLowerCase());
+    others.push(n);
+  };
+  for (const s of steps) if (s.is_user !== true) add(s.owner);
+  for (const u of (m.transcript && m.transcript.utterances) || []) {
+    if (u.speaker !== "You") add(u.speaker);
+  }
+  for (const p of m.participants || []) if (p && !p.is_self) add(p.name);
+  return { user, others };
+}
+
+function openOwnerMenu(pillEl, m, summary, ns) {
+  const wasOurs = openMenu && openMenu._btn === pillEl;
+  closeMenu();
+  if (wasOurs) return; // second click toggles off
+
+  const { user, others } = ownerCandidates(m, summary);
+  const menu = div("owner-menu");
+  menu._btn = pillEl;
+
+  const opt = (label, isUser) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    if (label === ns.owner) b.classList.add("current");
+    const pill = span("owner-pill " + (isUser ? "user" : "other"));
+    pill.textContent = label;
+    b.append(pill);
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeMenu();
+      applyOwner(m, ns, label, isUser);
+    });
+    menu.append(b);
+  };
+  opt(user, true);
+  for (const n of others) opt(n, false);
+
+  // Free entry for a name that isn't in any list.
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "Other name…";
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter" && input.value.trim()) {
+      const name = input.value.trim();
+      closeMenu();
+      applyOwner(m, ns, name, name.toLowerCase() === user.toLowerCase());
+    } else if (e.key === "Escape") closeMenu();
+  });
+  menu.append(input);
+
+  document.body.append(menu);
+  const r = pillEl.getBoundingClientRect();
+  const mw = menu.offsetWidth;
+  const mh = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - mw - 8)) + "px";
+  menu.style.top = (r.bottom + 4 + mh > window.innerHeight - 8 ? Math.max(8, r.top - mh - 4) : r.bottom + 4) + "px";
+  openMenu = menu;
+}
+
+async function applyOwner(m, ns, owner, isUser) {
+  if (ns.owner === owner && ns.is_user === isUser) return;
+  ns.owner = owner;
+  ns.is_user = isUser;
+  render(); // repaint — also re-sorts the list (the user's items first)
+  // Same persistence pattern as rename: the local cache when the meeting is in
+  // it, plus the durable Supabase row (metadata.summary), best effort.
+  if (meetings.some((x) => x.id === m.id)) {
+    chrome.runtime.sendMessage({ type: "WN_MEETING_UPSERT", meeting: { ...m } }).catch(() => {});
+  }
+  const remote = remoteMeetings.find((x) => x.id === m.id);
+  if (remote) remote.summary = m.summary;
+  try { await sb.updateMeetingSummary(m.id, m.summary); } catch (_) { /* offline / local-only */ }
 }
 
 // --- Bottom bar ----------------------------------------------------------
