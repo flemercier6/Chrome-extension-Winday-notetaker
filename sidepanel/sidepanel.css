@@ -211,7 +211,7 @@ button:disabled { opacity: 0.5; cursor: default; }
    A GRID with a max-content pill column keeps every task text aligned at the
    same x even though pills have different natural widths. */
 .summary .todo {
-  display: grid; grid-template-columns: auto max-content 1fr;
+  display: grid; grid-template-columns: auto max-content 1fr auto;
   column-gap: 8px; row-gap: 7px; align-items: start; width: 100%;
 }
 .summary .todo-item { display: contents; }
@@ -253,6 +253,24 @@ button:disabled { opacity: 0.5; cursor: default; }
 .owner-menu input:focus { border-color: var(--border-focus); }
 .summary .todo-task { flex: 1; font-size: 13px; line-height: 18px; }
 .summary .todo-item.done .todo-task { text-decoration: line-through; color: var(--text-muted); }
+
+/* Per-item Notion action (user's items only): hidden until the row is hovered;
+   sends the to-do to the tasks database chosen in Settings. */
+.summary .todo-notion { justify-self: end; min-height: 18px; }
+.summary .todo-notion > button {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 1px 4px; margin: -1px 0; color: var(--text-muted);
+  opacity: 0; transition: opacity 0.12s;
+}
+.summary .todo-item:hover .todo-notion > button,
+.summary .todo-notion > button:disabled,   /* keep the spinner visible while sending */
+.summary .todo-notion > button:focus-visible { opacity: 1; }
+.summary .todo-notion > button:hover { background: var(--bg-inset); color: var(--text-primary); }
+.summary .todo-notion > button.failed { opacity: 1; color: var(--danger); }
+/* Once added, the (link) button stays subtly visible so the state is readable. */
+.summary .todo-notion > button.added { opacity: 0.65; }
+.summary .todo-item:hover .todo-notion > button.added { opacity: 1; }
+.summary .todo-notion .spinner { width: 12px; height: 12px; }
 
 .summary .links { display: flex; gap: 8px; flex-wrap: wrap; }
 .summary-pending { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 13px; }

@@ -12,6 +12,11 @@
 //   GET      /notion-oauth/callback (public) Notion redirects here with ?code&state
 //   GET/POST ?action=status      (auth)   -> { connected, workspace_name, ... }
 //   POST     ?action=disconnect  (auth)   -> { ok: true }
+//   POST     ?action=databases   (auth)   -> { connected, databases: [{id,title,url}] }
+//                                            every database the token can see —
+//                                            for the Settings "Tasks database" picker
+//   POST     ?action=add-task    (auth)   -> { url }  creates one page (a to-do)
+//                                            in the caller-chosen tasks database
 //
 // Secrets (set once in Supabase): NOTION_OAUTH_CLIENT_ID, NOTION_OAUTH_CLIENT_SECRET.
 // The client_secret + every user access_token stay server-side only.
@@ -22,6 +27,8 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CLIENT_ID = Deno.env.get("NOTION_OAUTH_CLIENT_ID") ?? "";
 const CLIENT_SECRET = Deno.env.get("NOTION_OAUTH_CLIENT_SECRET") ?? "";
+// Legacy fallback token (shared internal integration) — same one export-notion uses.
+const NOTION_TOKEN = Deno.env.get("NOTION_TOKEN") ?? "";
 const REDIRECT_URI = `${SUPABASE_URL}/functions/v1/notion-oauth/callback`;
 const NOTION_VERSION = "2022-06-28";
 
@@ -53,6 +60,8 @@ Deno.serve(async (req) => {
       await admin.from("notion_connections").delete().eq("user_id", user.id);
       return json({ ok: true, connected: false });
     }
+    if (action === "databases") return json(await listDatabases(user.id));
+    if (action === "add-task") return await handleAddTask(user.id, req);
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
     return json({ error: String(e) }, 500);
@@ -178,6 +187,82 @@ async function handleCallback(url: URL) {
       : "Notion connected, but no database could be created. Grant access to at least one page and reconnect.",
     true,
   );
+}
+
+/// Notion token for a user: their OAuth connection, else the legacy shared
+/// internal-integration token (same resolution order as export-notion).
+async function tokenFor(userId: string): Promise<string | null> {
+  const { data } = await admin
+    .from("notion_connections").select("access_token").eq("user_id", userId).maybeSingle();
+  return data?.access_token || NOTION_TOKEN || null;
+}
+
+/// Every database the token can access — the Settings "Tasks database" picker.
+async function listDatabases(userId: string) {
+  const token = await tokenFor(userId);
+  if (!token) return { connected: false, databases: [] };
+  const databases: Array<{ id: string; title: string; url: string | null }> = [];
+  let cursor: string | undefined;
+  do {
+    const r = await notion(token, "POST", "/v1/search", {
+      filter: { value: "database", property: "object" },
+      page_size: 100,
+      ...(cursor ? { start_cursor: cursor } : {}),
+    });
+    if (!r.ok) break;
+    const body = await r.json();
+    for (const d of body.results ?? []) {
+      if (d.object !== "database") continue;
+      const title = (d.title ?? []).map((t: any) => t?.plain_text ?? "").join("").trim() || "Untitled";
+      databases.push({ id: d.id, title, url: d.url ?? null });
+    }
+    cursor = body.has_more ? body.next_cursor : undefined;
+  } while (cursor && databases.length < 300);
+  databases.sort((a, b) => a.title.localeCompare(b.title));
+  return { connected: true, databases };
+}
+
+/// Creates ONE page (a to-do row) in the caller-chosen tasks database. Database
+/// schemas vary, so only the title property is set (resolved by type — its name
+/// can be "Name", "Task", …); the source meeting is noted in the page body.
+async function handleAddTask(userId: string, req: Request) {
+  const { task, database_id, meeting_title, meeting_date } = await req.json().catch(() => ({} as any));
+  const text = String(task ?? "").trim();
+  if (!text) return json({ error: "No task text." }, 400);
+  if (!database_id) return json({ error: "No tasks database selected — choose one in Settings." }, 400);
+  const token = await tokenFor(userId);
+  if (!token) return json({ error: "Notion is not connected. Connect Notion in Settings." }, 400);
+
+  const dbResp = await notion(token, "GET", `/v1/databases/${database_id}`);
+  if (!dbResp.ok) {
+    return json({ error: `The tasks database is not accessible (Notion ${dbResp.status}) — re-pick it in Settings.` }, 502);
+  }
+  const db = await dbResp.json();
+  const titleProp =
+    Object.entries(db.properties ?? {}).find(([, p]: [string, any]) => p?.type === "title")?.[0] ?? "Name";
+
+  const children: unknown[] = [];
+  if (meeting_title) {
+    const when = meeting_date
+      ? " — " + new Date(meeting_date).toLocaleDateString("fr-FR", {
+          day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris",
+        })
+      : "";
+    children.push({
+      object: "block",
+      type: "paragraph",
+      paragraph: { rich_text: [{ type: "text", text: { content: `From meeting: ${meeting_title}${when}` } }] },
+    });
+  }
+
+  const resp = await notion(token, "POST", "/v1/pages", {
+    parent: { type: "database_id", database_id },
+    properties: { [titleProp]: { title: [{ type: "text", text: { content: text.slice(0, 1990) } }] } },
+    ...(children.length ? { children } : {}),
+  });
+  if (!resp.ok) return json({ error: `Notion ${resp.status}: ${await resp.text()}` }, 502);
+  const pg = await resp.json();
+  return json({ url: pg.url ?? null, id: pg.id ?? null });
 }
 
 // Create the "Winday Meeting Notes" database under the first page the token can

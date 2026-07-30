@@ -5,7 +5,7 @@ import { applyTheme } from "../lib/theme.js";
 import { icon } from "../lib/icons.js";
 
 const $ = (id) => document.getElementById(id);
-const fields = ["theme", "transcriptionProvider", "transcriptionLanguage", "panelMode", "notionDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
+const fields = ["theme", "transcriptionProvider", "transcriptionLanguage", "panelMode", "notionDatabaseID", "notionTasksDatabaseID", "autoExportToNotion", "summaryPrompt", "summaryLength", "deepgramModel", "geminiModel"];
 
 async function load() {
   const s = await store.getSettings();
@@ -61,6 +61,47 @@ function renderNotion(status) {
   }
   // Cache for the recorder's auto-export gate (server stays source of truth).
   store.setSettings({ notionConnected: connected }).catch(() => {});
+  maybeLoadTasksDbs(connected);
+}
+
+// --- Tasks database picker (where the user's next steps are sent) ----------
+// Loaded once per connection state — renderNotion runs on a poll while the
+// user authorizes, and re-listing Notion databases every tick would be rude.
+let dbsLoadedFor = null;
+function maybeLoadTasksDbs(connected) {
+  if (dbsLoadedFor === connected) return;
+  dbsLoadedFor = connected;
+  loadTasksDbs(connected).catch(() => { dbsLoadedFor = null; });
+}
+
+async function loadTasksDbs(connected) {
+  const sel = $("notionTasksDatabaseID");
+  const saved = (await store.getSettings()).notionTasksDatabaseID || "";
+  const opt = (value, label) => {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    sel.append(o);
+  };
+  sel.innerHTML = "";
+  if (!connected) {
+    opt(saved, saved ? "Saved database (connect Notion to change)" : "Connect Notion first");
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  opt("", "Not set — no button on next steps");
+  try {
+    const r = await sb.notionDatabases();
+    const seen = new Set();
+    for (const d of r.databases || []) { opt(d.id, d.title); seen.add(d.id); }
+    // Keep a saved id that the token can't see anymore selectable (don't
+    // silently drop the user's choice).
+    if (saved && !seen.has(saved)) opt(saved, "Saved database (not visible to Notion)");
+  } catch (_) {
+    if (saved) opt(saved, "Saved database");
+  }
+  sel.value = saved;
 }
 
 async function refreshNotion(session) {
@@ -135,6 +176,7 @@ async function save() {
     transcriptionLanguage: $("transcriptionLanguage").value,
     panelMode: $("panelMode").value === "docked" ? "docked" : "native",
     notionDatabaseID: $("notionDatabaseID").value.trim(),
+    notionTasksDatabaseID: $("notionTasksDatabaseID").value,
     autoExportToNotion: $("autoExportToNotion").checked,
     summaryPrompt: $("summaryPrompt").value,
     summaryLength: $("summaryLength").value,

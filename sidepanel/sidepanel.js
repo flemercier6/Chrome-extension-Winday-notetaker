@@ -37,6 +37,7 @@ let state = { phase: "idle" };
 let meetings = [];        // local cache (in-flight + recent, from chrome.storage)
 let remoteMeetings = [];  // durable history from Supabase (all devices)
 let session = null;
+let settings = null;      // user settings (theme is applied separately)
 let micGranted = false;
 let timer = null;
 
@@ -132,6 +133,7 @@ async function refresh() {
     session = await store.getSession();
     meetings = await store.getMeetings();
   }
+  settings = await store.getSettings();
   render();
   syncRemoteMeetings(); // pull durable history (re-renders when it lands)
   syncUpcoming(); // today's calendar calls (paints its own section)
@@ -172,10 +174,11 @@ chrome.runtime.onMessage.addListener((msg) => {
     // Re-read session + micGranted from storage (web sign-in / mic grant happen
     // in the service worker and only broadcast WN_STATE).
     const hadSession = !!session;
-    Promise.all([store.getMeetings(), store.getMicGranted(), store.getSession()]).then(([m, mic, sess]) => {
+    Promise.all([store.getMeetings(), store.getMicGranted(), store.getSession(), store.getSettings()]).then(([m, mic, sess, st]) => {
       meetings = m;
       micGranted = mic;
       session = sess;
+      settings = st;
       render();
       // Refresh the durable list when signing in, or after a call is saved.
       if (session && (!hadSession || state.phase === "done")) { syncRemoteMeetings(); syncUpcoming(); }
@@ -348,7 +351,20 @@ function renderSummaryFor(m) {
         });
       }
       const task = span("todo-task"); task.textContent = ns.task;
-      item.append(cb, owner, task);
+      // 4th grid cell — every row needs one (display:contents grid). For the
+      // USER'S items it holds the Notion action: add this to-do to the tasks
+      // database chosen in Settings (the button shows on row hover).
+      const tail = span("todo-notion");
+      if (isUser(ns) && m && m.id) {
+        if (ns.notion_task_url) {
+          const a = iconLink("notion-open", "Added to Notion — open the task", ns.notion_task_url);
+          a.classList.add("added");
+          tail.append(a);
+        } else if (settings && settings.notionTasksDatabaseID) {
+          tail.append(taskToNotionBtn(m, ns));
+        }
+      }
+      item.append(cb, owner, task, tail);
       list.append(item);
     }
     s.append(h, list); box.append(s);
@@ -476,14 +492,49 @@ async function applyOwner(m, ns, owner, isUser) {
   ns.owner = owner;
   ns.is_user = isUser;
   render(); // repaint — also re-sorts the list (the user's items first)
-  // Same persistence pattern as rename: the local cache when the meeting is in
-  // it, plus the durable Supabase row (metadata.summary), best effort.
+  await persistSummaryEdit(m);
+}
+
+// Persist an in-place edit of m.summary (reassigned owner, notion_task_url):
+// the local cache when the meeting is in it, the merged remote entry, and the
+// durable Supabase row (metadata.summary) — same pattern as rename, best effort.
+function persistSummaryEdit(m) {
   if (meetings.some((x) => x.id === m.id)) {
     chrome.runtime.sendMessage({ type: "WN_MEETING_UPSERT", meeting: { ...m } }).catch(() => {});
   }
   const remote = remoteMeetings.find((x) => x.id === m.id);
   if (remote) remote.summary = m.summary;
-  try { await sb.updateMeetingSummary(m.id, m.summary); } catch (_) { /* offline / local-only */ }
+  return sb.updateMeetingSummary(m.id, m.summary).catch(() => { /* offline / local-only */ });
+}
+
+// Send ONE next step to the user's Notion tasks database (Settings → Notion).
+// Success is remembered on the step itself (notion_task_url) so the button
+// becomes an "open the task" link — on every device, and no double-adds.
+function taskToNotionBtn(m, ns) {
+  const b = iconBtn("notion-send", "Add this task to Notion", async (e) => {
+    e.preventDefault();   // inside a <label>: don't toggle the checkbox
+    e.stopPropagation();
+    if (b.disabled) return;
+    b.disabled = true;
+    b.replaceChildren(span("spinner"));
+    try {
+      const r = await sb.notionAddTask({
+        task: ns.task,
+        database_id: settings.notionTasksDatabaseID,
+        meeting_title: m.title || null,
+        meeting_date: m.startedAt || null,
+      });
+      ns.notion_task_url = r.url || "";
+      persistSummaryEdit(m);
+      render(); // repaint: the button becomes an "open the task" link
+    } catch (err) {
+      b.disabled = false;
+      b.replaceChildren(icon("notion-send", 16));
+      b.title = "Couldn't add to Notion: " + ((err && err.message) || err);
+      b.classList.add("failed");
+    }
+  });
+  return b;
 }
 
 // --- Bottom bar ----------------------------------------------------------
