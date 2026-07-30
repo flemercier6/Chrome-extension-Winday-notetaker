@@ -207,7 +207,25 @@ chrome.runtime.onMessage.addListener((msg) => {
   // Stop/cancel routed by the service worker when THIS panel hosts the recording.
   if (msg?.type === "WN_PANEL_STOP") panelRecorder?.stop(false);
   if (msg?.type === "WN_PANEL_CANCEL") panelRecorder?.stop(true);
+  // The native side panel delegated its fallback capture to THIS embedded
+  // panel (see startRecording): surface a clear call to action.
+  if (msg?.type === "WN_ARM_FALLBACK" && isEmbedded && state.phase === "idle") armFallbackCta();
 });
+
+// Delegated-fallback CTA: the hint + the Start button, front and center.
+function armFallbackCta() {
+  const bar = $("bottombar");
+  bar.innerHTML = "";
+  const s = div("status-bar");
+  const t = document.createElement("div");
+  t.className = "hint";
+  t.style.textAlign = "center";
+  t.textContent = "Capture this call from here — click Start Recording, then 'Share'.";
+  s.append(t);
+  const start = btn("Start Recording", "start", startRecording);
+  start.prepend(icon("mic", 20));
+  bar.append(s, start);
+}
 
 // --- Render --------------------------------------------------------------
 
@@ -774,11 +792,24 @@ async function startRecording() {
     return recorderHint(r?.error || "Couldn't capture the call tab.");
   }
 
-  // 2) Fallback: capture HERE via the standard share dialog. Works embedded
-  //    in the Meet tab (one-click, preferCurrentTab) and in the native side
-  //    panel (generic picker). A full-tab dashboard has no call to point at.
+  // 2) Fallback: capture via the standard share dialog — but only when THIS
+  //    document can safely host the recording. A full-tab dashboard has no
+  //    call to point at, and the NATIVE side panel dies whenever the user
+  //    closes it (which used to kill the recording mid-call): both delegate.
   if (isTabPage) {
     return recorderHint("Open the panel from the call tab, then try again.");
+  }
+  if (!isEmbedded) {
+    // Native side panel → hand the capture to the panel iframe docked INSIDE
+    // the Meet tab. That host survives this panel closing and tab switches;
+    // closing the call's tab itself is covered by the crash journal.
+    const d = await chrome.runtime.sendMessage({ type: "WN_FALLBACK_TO_TAB" }).catch(() => null);
+    if (d && d.ok) {
+      recorderHint("Continue from the call tab: click 'Start Recording' in the panel that just opened over the call.", false);
+    } else {
+      recorderHint((d && d.error) || "Couldn't reach the call tab — open your call and record from its panel.");
+    }
+    return;
   }
   recorderHint("In the share dialog, pick the call tab and keep 'Share audio' on.", false);
   let tabStream;

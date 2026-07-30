@@ -241,6 +241,28 @@ async function handle(msg, sender) {
       }
     }
 
+    // The NATIVE side panel refuses to host a fallback recording (the capture
+    // dies with the panel document): dock the panel iframe in the call's tab,
+    // bring that tab forward, and let the user start the capture from there —
+    // a host that survives the side panel closing and tab switches.
+    case "WN_FALLBACK_TO_TAB": {
+      const tab = await resolveMeetTab(msg.tabId, sender);
+      if (!tab) return { ok: false, error: "No Google Meet tab found — open your call, then try again." };
+      // Arm the content script FIRST: while armed it keeps the docked overlay
+      // visible even though the native panel is open (its usual self-heal
+      // hides the redundant overlay — here the overlay is the whole point).
+      await chrome.tabs.sendMessage(tab.id, { type: "WN_ARM_FALLBACK" }).catch(() => {});
+      await openPanelInTab(tab); // re-injects a stale content script if needed
+      await chrome.tabs.sendMessage(tab.id, { type: "WN_ARM_FALLBACK" }).catch(() => {});
+      await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+      chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      // CTA inside the embedded panel — sent twice, the iframe may still be
+      // booting when the first broadcast fires.
+      chrome.runtime.sendMessage({ type: "WN_ARM_FALLBACK" }).catch(() => {});
+      setTimeout(() => chrome.runtime.sendMessage({ type: "WN_ARM_FALLBACK" }).catch(() => {}), 1200);
+      return { ok: true };
+    }
+
     // The panel started a fallback (getDisplayMedia) recording in its iframe.
     case "WN_PANEL_REC_STARTED":
       await setState({

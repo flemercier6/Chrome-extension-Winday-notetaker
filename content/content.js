@@ -43,6 +43,10 @@
   let inCall = false;
   let tick = null;
   let dismissedKey = null; // pill closed via its ✕, for the current prompt only
+  // The native side panel delegated a fallback capture to our docked iframe:
+  // while armed, the "hide the overlay when the native panel is open"
+  // self-heal is suspended — the overlay IS the capture host being set up.
+  let fallbackArmed = false;
 
   // Identity of what the pill is currently prompting for — the dismissal
   // sticks to THIS call/prompt and naturally clears when it changes.
@@ -87,6 +91,7 @@
   }
 
   function hidePanel() {
+    fallbackArmed = false;
     if (panelHost) panelHost.style.display = "none";
     render(); // panel gone -> the pill may come back
   }
@@ -189,7 +194,10 @@
     const imm = state.imminentCall || null;
     // Self-heal a double panel: if the NATIVE side panel is present while our
     // docked overlay is also showing, the overlay is redundant — drop it.
-    if (state.panelOpen === true && panelHost && panelHost.style.display !== "none") {
+    // EXCEPT while a delegated fallback capture is being set up in the overlay
+    // (fallbackArmed): the overlay is the capture host, keep it up. Once the
+    // recording starts the overlay can hide again — hiding keeps it alive.
+    if (state.panelOpen === true && !fallbackArmed && panelHost && panelHost.style.display !== "none") {
       panelHost.style.display = "none";
     }
     if (phase !== "idle" || (!inCall && !imm)) { unmount(); return; }
@@ -264,7 +272,14 @@
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === "WN_STATE") {
       state = msg.state || { phase: "idle" };
+      // Recording started (or the pipeline is running): the delegated-capture
+      // setup is over — the normal overlay behavior resumes.
+      if (state.phase && state.phase !== "idle") fallbackArmed = false;
       render();
+    }
+    if (msg?.type === "WN_ARM_FALLBACK") {
+      fallbackArmed = true;
+      openPanel();
     }
     if (msg?.type === "WN_TOGGLE_PANEL") {
       if (msg.ensure === "open") openPanel();
