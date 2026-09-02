@@ -70,6 +70,9 @@ chrome.runtime.onMessage.addListener((msg) => {
     case "RETRY":
       withWorkPort(() => retryMeeting(msg)).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
       break;
+    case "IMPORT":
+      importMeeting(msg).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
+      break;
     case "EXPORT":
       withWorkPort(() => exportMeeting(msg)).catch((e) => report({ type: "WN_REC_FAILED", error: String(e?.message || e) }));
       break;
@@ -112,6 +115,26 @@ async function retryMeeting({ meeting, session, settings }) {
     report({ type: "WN_REC_DONE", notionURL: result.notionPageURL || null, meetingId: result.id });
   } catch (e) {
     const failed = { ...meeting, status: "failed", errorMessage: String(e?.message || e) };
+    report({ type: "WN_MEETING_UPSERT", meeting: failed });
+    report({ type: "WN_REC_FAILED", error: failed.errorMessage });
+  }
+}
+
+async function importMeeting({ meeting, transcript, session, settings }) {
+  if (!meeting) throw new Error("Nothing to import.");
+  configureSession(session);
+  try {
+    const result = await pipeline.importTranscript(meeting, transcript, {
+      settings,
+      onStage: (stage) => report({ type: "WN_REC_STAGE", stage }),
+    });
+    report({ type: "WN_MEETING_UPSERT", meeting: result });
+    if (result.errorMessage) report({ type: "WN_REC_FAILED", error: result.errorMessage });
+    else report({ type: "WN_REC_DONE", notionURL: result.notionPageURL || null, meetingId: result.id });
+  } catch (e) {
+    // The transcript is the user's only copy of the call — keep it locally even
+    // when the import could not reach the backend.
+    const failed = { ...meeting, transcript, status: "failed", errorMessage: String(e?.message || e) };
     report({ type: "WN_MEETING_UPSERT", meeting: failed });
     report({ type: "WN_REC_FAILED", error: failed.errorMessage });
   }

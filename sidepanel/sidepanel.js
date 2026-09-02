@@ -15,6 +15,7 @@ import * as store from "../lib/store.js";
 import { createRecorder, acquireMic, requestMicPermission, journalPeekUtterances } from "../lib/capture.js";
 import { applyTheme } from "../lib/theme.js";
 import { icon } from "../lib/icons.js";
+import { parseTranscript, titleFromFilename } from "../lib/transcript-import.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -189,6 +190,9 @@ chrome.runtime.onMessage.addListener((msg) => {
       liveUtterances = []; interim = {}; vizBars = null; activeTab = "transcript"; viewingId = null;
     }
     if (prev === "recording" && state.phase !== "recording") activeTab = "summary";
+    // Import and Retry never pass through "recording": land on the summary
+    // when their run finishes, which is the thing the user was waiting for.
+    if (prev === "processing" && state.phase === "done") activeTab = "summary";
     // Re-read session + micGranted from storage (web sign-in / mic grant happen
     // in the service worker and only broadcast WN_STATE).
     const hadSession = !!session;
@@ -981,6 +985,60 @@ $("mic-link").addEventListener("click", async (e) => {
       "in the address bar, or this site's Microphone permission in your browser settings.";
     $("mic-banner-error").classList.remove("hidden");
   }
+});
+
+// --- Import a transcript file -------------------------------------------
+// For calls this extension never recorded (captured elsewhere, or an audio
+// upload that Storage refused). The parsed transcript goes through the same
+// pipeline as a recording: meeting row → CRM → summary → Notion.
+$("btn-import").addEventListener("click", () => {
+  $("import-error").classList.add("hidden");
+  $("import-file").click();
+});
+
+$("import-file").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = ""; // let the same file be picked again after a failure
+  if (!file) return;
+
+  const fail = (msg) => {
+    const box = $("import-error");
+    box.textContent = "";
+    box.append(icon("alert", 14), document.createTextNode(" " + msg));
+    box.classList.remove("hidden");
+  };
+
+  let transcript;
+  try {
+    transcript = parseTranscript(await file.text());
+  } catch (err) {
+    return fail("Couldn't read that file (" + (err?.message || err) + ").");
+  }
+  if (transcript.utterances.length === 0) return fail("That file has no readable transcript.");
+
+  // The file's own date is the closest thing to when the call happened; a
+  // generic filename leaves the title to the AI headline.
+  const at = new Date(file.lastModified || Date.now()).toISOString();
+  const named = titleFromFilename(file.name);
+  const meeting = {
+    id: crypto.randomUUID(),
+    title: named || `Meeting ${new Date(at).toLocaleString()}`,
+    startedAt: at,
+    endedAt: at,
+    calendar: null,
+  };
+
+  // Show the imported transcript straight away — the Summary tab spins next
+  // to it until the notes land.
+  liveUtterances = transcript.utterances.map((u) => ({
+    channel: u.speaker === "You" ? 0 : 1, speaker: u.speaker, text: u.text,
+  }));
+  interim = {};
+  viewingId = null;
+  activeTab = "transcript";
+
+  const r = await chrome.runtime.sendMessage({ type: "WN_IMPORT", meeting, transcript }).catch(() => null);
+  if (!r?.ok) fail(r?.error || "Couldn't start the import.");
 });
 
 // Back to the recordings list — from a viewed past meeting, or a finished session.

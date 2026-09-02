@@ -111,6 +111,18 @@ Works in **Chrome**, **Dia** and **Arc**. The panel has two display modes
    enabled) exports to Notion. Progress and the result stay visible in the
    panel, and the meeting appears in the Winday CRM.
 
+### Importing a transcript you already have
+
+The **import** button next to *Recordings* takes a transcript file and turns it
+into a real meeting — same row in the CRM, same AI notes, same Notion export.
+Use it for a call this extension never recorded, or one whose audio never made
+it to Storage. Accepted: `.txt`, `.md`, `.vtt`, `.srt`, and the parser is
+deliberately tolerant — `Name: what they said`, a speaker on its own line above
+their lines, leading timestamps, VTT/SRT cue scaffolding. Say **You** (or
+*moi*, *vous*) for yourself and the summary will attribute your action items to
+you. The file's own date becomes the meeting's date, and its name the title —
+call it `transcript.txt` and the AI headline is used instead.
+
 ### Notes & limitations (v1)
 
 - **Capture authorization**: Chromium only allows *silent* tab capture on a tab
@@ -179,6 +191,7 @@ lib/capture.js         shared recording engine (offscreen + panel fallback)
 options/               settings: mic permission, Notion db, models, prompt
 lib/supabase.js        auth / storage / Edge Function REST client
 lib/pipeline.js        upload → transcribe → summarize → export orchestration
+lib/transcript-import.js  parses a pasted-in transcript file into utterances
 lib/store.js           chrome.storage: session, settings, meetings cache
 icons/                 prebuilt PNG icons (+ generator)
 supabase/              shared Edge Functions (reference; already deployed)

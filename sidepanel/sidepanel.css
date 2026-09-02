@@ -122,6 +122,9 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 /* Recordings list */
 .section-title { font-weight: 500; font-size: 12px; line-height: 16px; color: var(--text-secondary); margin-top: 2px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.section-head .icon { margin: -4px -4px -4px 0; }
+#import-error { margin: 4px 0 2px; }
 .list {
   flex: 1; min-height: 0; overflow-y: auto;
   display: flex; flex-direction: column; gap: 6px; padding-bottom: 2px;

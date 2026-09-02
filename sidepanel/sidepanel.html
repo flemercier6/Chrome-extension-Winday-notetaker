@@ -44,7 +44,12 @@
               <div class="section-title">Today</div>
               <div id="upcoming" class="list"></div>
             </div>
-            <div class="section-title">Recordings</div>
+            <div class="section-head">
+              <div class="section-title">Recordings</div>
+              <button id="btn-import" class="icon" title="Import a transcript file" data-icon="import" data-icon-size="17" aria-label="Import a transcript file"></button>
+            </div>
+            <input id="import-file" type="file" accept=".txt,.md,.vtt,.srt,text/plain" hidden>
+            <div id="import-error" class="error small hidden"></div>
             <div id="list" class="list"></div>
           </div>
 

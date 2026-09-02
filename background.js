@@ -334,6 +334,32 @@ async function handle(msg, sender) {
       return { ok: true };
     }
 
+    // A transcript file the user imported: same pipeline as a recorded call,
+    // minus the audio. Runs in the offscreen document so it survives the panel
+    // being closed mid-summary.
+    case "WN_IMPORT": {
+      const session = await store.getSession();
+      if (!session || !msg.meeting) return { ok: false, error: "Not available." };
+      await store.upsertMeeting({ ...msg.meeting, transcript: msg.transcript, status: "summarizing" });
+      await ensureOffscreen();
+      await setState({
+        phase: "processing",
+        meetingId: msg.meeting.id,
+        title: msg.meeting.title,
+        stage: "summarizing",
+        error: null,
+        notionURL: null,
+      });
+      await sendToOffscreen({
+        type: "IMPORT",
+        meeting: msg.meeting,
+        transcript: msg.transcript,
+        session,
+        settings: await store.getSettings(),
+      });
+      return { ok: true };
+    }
+
     case "WN_EXPORT": {
       const meeting = (await store.getMeetings()).find((m) => m.id === msg.id);
       const session = await store.getSession();
