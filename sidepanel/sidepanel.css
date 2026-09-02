@@ -125,6 +125,28 @@ button:disabled { opacity: 0.5; cursor: default; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .section-head .icon { margin: -4px -4px -4px 0; }
 #import-error { margin: 4px 0 2px; }
+
+/* Import preview — the parser's guess at who spoke, shown before anything is
+   created so a bad split (or "which one is me?") is fixed in one tap. */
+.import-preview {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px; margin-bottom: 4px;
+  background: var(--bg-surface); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+.import-head { font-weight: 500; font-size: 13px; line-height: 18px; }
+.import-preview .hint { margin: -2px 0 2px; }
+.import-preview .row { margin-top: 2px; }
+.speaker-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.speaker-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; font-size: 12px; line-height: 16px; font-weight: 500;
+  color: var(--text-secondary); background: var(--bg-inset);
+  border: 1px solid transparent; border-radius: var(--radius-full);
+}
+.speaker-chip:hover { border-color: var(--border-default); color: var(--text-primary); }
+.speaker-chip.you { background: var(--bg-inverse); color: var(--text-inverse); }
+.chip-count { font-variant-numeric: tabular-nums; opacity: 0.65; }
 .list {
   flex: 1; min-height: 0; overflow-y: auto;
   display: flex; flex-direction: column; gap: 6px; padding-bottom: 2px;

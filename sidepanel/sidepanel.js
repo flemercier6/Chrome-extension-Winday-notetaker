@@ -15,7 +15,7 @@ import * as store from "../lib/store.js";
 import { createRecorder, acquireMic, requestMicPermission, journalPeekUtterances } from "../lib/capture.js";
 import { applyTheme } from "../lib/theme.js";
 import { icon } from "../lib/icons.js";
-import { parseTranscript, titleFromFilename } from "../lib/transcript-import.js";
+import { parseTranscript, renameSpeakers, titleFromFilename } from "../lib/transcript-import.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -991,8 +991,15 @@ $("mic-link").addEventListener("click", async (e) => {
 // For calls this extension never recorded (captured elsewhere, or an audio
 // upload that Storage refused). The parsed transcript goes through the same
 // pipeline as a recording: meeting row → CRM → summary → Notion.
+//
+// Splitting a pasted transcript by speaker is guesswork, so the guess is shown
+// before anything is created: who the parser found, how much each of them said,
+// and which one is the user — that last one decides whose next steps the
+// summary puts first, and only the user can answer it.
+let pendingImport = null; // { transcript, file, youLabel }
+
 $("btn-import").addEventListener("click", () => {
-  $("import-error").classList.add("hidden");
+  importError(null);
   $("import-file").click();
 });
 
@@ -1000,21 +1007,71 @@ $("import-file").addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
   e.target.value = ""; // let the same file be picked again after a failure
   if (!file) return;
-
-  const fail = (msg) => {
-    const box = $("import-error");
-    box.textContent = "";
-    box.append(icon("alert", 14), document.createTextNode(" " + msg));
-    box.classList.remove("hidden");
-  };
+  importError(null);
 
   let transcript;
   try {
     transcript = parseTranscript(await file.text());
   } catch (err) {
-    return fail("Couldn't read that file (" + (err?.message || err) + ").");
+    return importError("Couldn't read that file (" + (err?.message || err) + ").");
   }
-  if (transcript.utterances.length === 0) return fail("That file has no readable transcript.");
+  if (transcript.utterances.length === 0) return importError("That file has no readable transcript.");
+
+  // Pre-select the user when the file already says "You" — nothing to correct.
+  const you = transcript.speakers.find((sp) => sp.name === "You");
+  pendingImport = { transcript, file, youLabel: you ? "You" : null };
+  renderImportPreview();
+});
+
+function importError(msg) {
+  const box = $("import-error");
+  box.textContent = "";
+  box.classList.toggle("hidden", !msg);
+  if (msg) box.append(icon("alert", 14), document.createTextNode(" " + msg));
+}
+
+function renderImportPreview() {
+  const box = $("import-preview");
+  box.textContent = "";
+  box.classList.toggle("hidden", !pendingImport);
+  if (!pendingImport) return;
+
+  const { transcript, youLabel } = pendingImport;
+  const head = div("import-head");
+  head.append(text(`${transcript.utterances.length} turns · ${transcript.speakers.length} speaker${transcript.speakers.length > 1 ? "s" : ""}`));
+  const hint = div("hint");
+  hint.textContent = youLabel
+    ? "Tap a name to change who you are."
+    : "Which one is you? Tap your name so your action items land on you.";
+
+  const chips = div("speaker-chips");
+  for (const sp of transcript.speakers) {
+    const isYou = sp.name === youLabel;
+    const chip = btn("", "speaker-chip" + (isYou ? " you" : ""), () => {
+      pendingImport.youLabel = isYou ? null : sp.name;
+      renderImportPreview();
+    });
+    chip.append(text(isYou ? `${sp.name} — you` : sp.name), span("chip-count"));
+    chip.lastChild.textContent = String(sp.turns);
+    chips.append(chip);
+  }
+
+  const actions = div("row");
+  actions.append(
+    btn("Import", "primary", startImport),
+    btn("Cancel", "ghost", () => { pendingImport = null; renderImportPreview(); }),
+  );
+  box.append(head, chips, hint, actions);
+}
+
+async function startImport() {
+  if (!pendingImport) return;
+  const { file, youLabel } = pendingImport;
+  // Relabelling happens here, once, so the stored transcript, the CRM row and
+  // the summary all agree on who said what.
+  const transcript = youLabel && youLabel !== "You"
+    ? renameSpeakers(pendingImport.transcript, { [youLabel]: "You" })
+    : pendingImport.transcript;
 
   // The file's own date is the closest thing to when the call happened; a
   // generic filename leaves the title to the AI headline.
@@ -1036,10 +1093,12 @@ $("import-file").addEventListener("change", async (e) => {
   interim = {};
   viewingId = null;
   activeTab = "transcript";
+  pendingImport = null;
+  renderImportPreview();
 
   const r = await chrome.runtime.sendMessage({ type: "WN_IMPORT", meeting, transcript }).catch(() => null);
-  if (!r?.ok) fail(r?.error || "Couldn't start the import.");
-});
+  if (!r?.ok) importError(r?.error || "Couldn't start the import.");
+}
 
 // Back to the recordings list — from a viewed past meeting, or a finished session.
 $("btn-back").addEventListener("click", () => {

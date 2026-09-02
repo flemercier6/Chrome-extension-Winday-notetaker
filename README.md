@@ -40,8 +40,10 @@ one shows up in the same place.
    keeps a multi‑hour call well under the Storage upload limit.
 2. **Upload** — the recording is uploaded to the private Supabase `recordings`
    bucket and a `meetings` row is created (Row‑Level Security: you only ever see
-<<<<<<< HEAD
-   your own).
+   your own). When the upload fails (over the project's Storage upload limit, or
+   a network drop) and a live transcript exists, the meeting is still saved,
+   summarized and exported — only the playable audio is lost, and the reason is
+   kept in `metadata.audio_upload_error`.
 3. **Transcribe / Summarize / Export** — the extension invokes the Edge
    Functions by meeting id. Transcription goes to the engine chosen in
    Settings: **Gladia** (`transcribe-gladia` — async pre‑recorded API with
@@ -51,17 +53,6 @@ one shows up in the same place.
    macOS app uses). Either way **channel 0 = "You"**, **channel 1 = the
    others**. Gemini and Notion run next, all **using secrets stored
    server‑side**, then the results are written back to the meeting row.
-=======
-   your own). The transcript is produced **live**, so the audio file is an
-   archive: if its upload fails (over the project's Storage upload limit, or a
-   network drop) the meeting is still saved, summarized and exported — only the
-   playable audio is lost, and the reason is kept in `metadata.audio_upload_error`.
-3. **Transcribe / Summarize / Export** — the extension invokes the same Edge
-   Functions the macOS app uses, by meeting id. They call Deepgram
-   (`multichannel=true`, so **channel 0 = "You"**, **channel 1 = the others**),
-   Gemini and Notion **using secrets stored server‑side**, then write the
-   results back to the meeting row.
->>>>>>> c9d7f78 (Never lose a call when its audio upload is refused)
 
 The third‑party keys (Gladia, Deepgram, Gemini, Notion) are **never shipped to
 the extension** — they live only as Supabase Edge Function secrets. The
@@ -118,10 +109,18 @@ into a real meeting — same row in the CRM, same AI notes, same Notion export.
 Use it for a call this extension never recorded, or one whose audio never made
 it to Storage. Accepted: `.txt`, `.md`, `.vtt`, `.srt`, and the parser is
 deliberately tolerant — `Name: what they said`, a speaker on its own line above
-their lines, leading timestamps, VTT/SRT cue scaffolding. Say **You** (or
-*moi*, *vous*) for yourself and the summary will attribute your action items to
-you. The file's own date becomes the meeting's date, and its name the title —
-call it `transcript.txt` and the AI headline is used instead.
+their lines, `Name  00:12` as Meet and Teams export it, leading timestamps,
+VTT/SRT cue scaffolding.
+
+Splitting a pasted transcript by speaker is guesswork, so the guess is shown
+before anything is created: who the parser found and how many turns each of
+them took, with one tap to say **which one is you** (that decides whose action
+items the summary puts first). The parser reads the file twice — once to work
+out the cast, once to split it — because judging each line on its own shape
+turns every short reply ("Ok parfait") into a bogus speaker.
+
+The file's own date becomes the meeting's date, and its name the title — call
+it `transcript.txt` and the AI headline is used instead.
 
 ### Notes & limitations (v1)
 
