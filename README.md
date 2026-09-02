@@ -36,9 +36,11 @@ one shows up in the same place.
    (`chrome.tabCapture`, i.e. the remote participants) and your **microphone**
    (`getUserMedia`), and mixes them with the Web Audio API into a single
    **stereo** stream: **left = you**, **right = the meeting**. It records that to
-   `webm/opus` with `MediaRecorder`.
+   `webm/opus` with `MediaRecorder` at **48 kbps** — plenty for speech, and it
+   keeps a multi‑hour call well under the Storage upload limit.
 2. **Upload** — the recording is uploaded to the private Supabase `recordings`
    bucket and a `meetings` row is created (Row‑Level Security: you only ever see
+<<<<<<< HEAD
    your own).
 3. **Transcribe / Summarize / Export** — the extension invokes the Edge
    Functions by meeting id. Transcription goes to the engine chosen in
@@ -49,6 +51,17 @@ one shows up in the same place.
    macOS app uses). Either way **channel 0 = "You"**, **channel 1 = the
    others**. Gemini and Notion run next, all **using secrets stored
    server‑side**, then the results are written back to the meeting row.
+=======
+   your own). The transcript is produced **live**, so the audio file is an
+   archive: if its upload fails (over the project's Storage upload limit, or a
+   network drop) the meeting is still saved, summarized and exported — only the
+   playable audio is lost, and the reason is kept in `metadata.audio_upload_error`.
+3. **Transcribe / Summarize / Export** — the extension invokes the same Edge
+   Functions the macOS app uses, by meeting id. They call Deepgram
+   (`multichannel=true`, so **channel 0 = "You"**, **channel 1 = the others**),
+   Gemini and Notion **using secrets stored server‑side**, then write the
+   results back to the meeting row.
+>>>>>>> c9d7f78 (Never lose a call when its audio upload is refused)
 
 The third‑party keys (Gladia, Deepgram, Gemini, Notion) are **never shipped to
 the extension** — they live only as Supabase Edge Function secrets. The

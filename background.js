@@ -318,9 +318,16 @@ async function handle(msg, sender) {
 
     // --- Actions on past meetings (run in offscreen so they survive) ---
     case "WN_RETRY": {
-      const meeting = (await store.getMeetings()).find((m) => m.id === msg.id);
       const session = await store.getSession();
-      if (!meeting || !session) return { ok: false, error: "Not available." };
+      if (!session) return { ok: false, error: "Not available." };
+      let meeting = (await store.getMeetings()).find((m) => m.id === msg.id);
+      if (!meeting) {
+        // Synced meetings (recorded on another device, or aged out of the local
+        // cache) are retryable too — the server row carries transcript + audio.
+        sb.useSession(session, (s) => store.setSession(s), () => store.getSession());
+        meeting = await sb.getMeeting(msg.id).catch(() => null);
+      }
+      if (!meeting) return { ok: false, error: "Not available." };
       await ensureOffscreen();
       await setState({ phase: "processing", meetingId: meeting.id, stage: null, error: null });
       await sendToOffscreen({ type: "RETRY", meeting, session, settings: await store.getSettings() });

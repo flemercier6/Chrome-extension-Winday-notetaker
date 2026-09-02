@@ -678,7 +678,9 @@ function itemRow(m) {
 
   const actions = div("item-actions");
   if (!busy) {
-    if (local && (m.status === "recorded" || m.status === "failed"))
+    // Retry works on synced meetings too: the server row has the transcript,
+    // so a call whose summary failed can be finished from any device.
+    if (m.status === "recorded" || m.status === "failed")
       actions.append(iconBtn("retry", "Transcribe & summarize", () => chrome.runtime.sendMessage({ type: "WN_RETRY", id: m.id })));
     if (local && m.status === "ready" && !m.notionPageURL)
       actions.append(iconBtn("notion-send", "Send to Notion", () => chrome.runtime.sendMessage({ type: "WN_EXPORT", id: m.id })));
